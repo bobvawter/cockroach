@@ -27,6 +27,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/cockroachdb/cockroach/pkg/sql/sqlbase/intsize"
 	"github.com/opentracing/opentracing-go"
 	"github.com/pkg/errors"
 
@@ -101,6 +102,19 @@ var traceTxnThreshold = settings.RegisterDurationSetting(
 var traceSessionEventLogEnabled = settings.RegisterBoolSetting(
 	"sql.trace.session_eventlog.enabled",
 	"set to true to enable session tracing", false,
+)
+
+// DefaultIntSize controls the SQL type that INT gets mapped to.
+// This is a transitional setting which will be removed.
+// https://github.com/cockroachdb/cockroach/issues/26925
+var DefaultIntSize = settings.RegisterEnumSetting(
+	"sql.default_int_size",
+	"the default size of the INT type in bytes",
+	intsize.INT8.String(),
+	map[int64]string{
+		int64(intsize.INT8): intsize.INT8.String(),
+		int64(intsize.INT4): intsize.INT4.String(),
+	},
 )
 
 // OptimizerClusterMode controls the cluster default for when the cost-based optimizer is used.
@@ -980,7 +994,7 @@ func anonymizeStmtAndConstants(stmt tree.Statement) string {
 func AnonymizeStatementsForReporting(action, sqlStmts string, r interface{}) error {
 	var anonymized []string
 	{
-		stmts, err := parser.Parse(sqlStmts)
+		stmts, err := parser.Parse(parser.Default(), sqlStmts)
 		if err == nil {
 			for _, stmt := range stmts {
 				anonymized = append(anonymized, anonymizeStmtAndConstants(stmt))
@@ -1604,6 +1618,10 @@ func (m *sessionDataMutator) SetExtraFloatDigits(val int) {
 
 func (m *sessionDataMutator) SetDatabase(dbName string) {
 	m.data.Database = dbName
+}
+
+func (m *sessionDataMutator) SetDefaultIntSize(size intsize.IntSize) {
+	m.data.DefaultIntSize = size
 }
 
 func (m *sessionDataMutator) SetDefaultIsolationLevel(iso enginepb.IsolationType) {

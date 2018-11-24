@@ -24,6 +24,7 @@ import (
 	"github.com/cockroachdb/cockroach/pkg/sql/pgwire/pgerror"
 	"github.com/cockroachdb/cockroach/pkg/sql/sem/tree"
 	"github.com/cockroachdb/cockroach/pkg/sql/sqlbase"
+	"github.com/cockroachdb/cockroach/pkg/sql/sqlbase/intsize"
 	"github.com/cockroachdb/cockroach/pkg/util/ctxgroup"
 	"github.com/cockroachdb/cockroach/pkg/util/hlc"
 	"github.com/cockroachdb/cockroach/pkg/util/log"
@@ -85,7 +86,7 @@ func (p *postgreStream) Next() (interface{}, error) {
 
 	for p.s.Scan() {
 		t := p.s.Text()
-		stmts, err := parser.Parse(t)
+		stmts, err := parser.Parse(parser.IntSize(intsize.INT4), t)
 		if err != nil {
 			// Something non-parseable may be something we don't yet parse but still
 			// want to ignore.

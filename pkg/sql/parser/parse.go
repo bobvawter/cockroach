@@ -30,6 +30,8 @@ import (
 	"github.com/cockroachdb/cockroach/pkg/sql/coltypes"
 	"github.com/cockroachdb/cockroach/pkg/sql/pgwire/pgerror"
 	"github.com/cockroachdb/cockroach/pkg/sql/sem/tree"
+	"github.com/cockroachdb/cockroach/pkg/sql/sqlbase/intsize"
+	"github.com/pkg/errors"
 )
 
 // Parser wraps a scanner, parser and other utilities present in the parser
@@ -40,12 +42,45 @@ type Parser struct {
 }
 
 // Parse parses the sql and returns a list of statements.
-func (p *Parser) Parse(sql string) (stmts tree.StatementList, err error) {
-	return parseWithDepth(1, sql)
+func (p *Parser) Parse(ctx Context, sql string) (stmts tree.StatementList, err error) {
+	return parseWithDepth(ctx, 1, sql)
 }
 
-func (p *Parser) parseWithDepth(depth int, sql string) (stmts tree.StatementList, err error) {
+var defaultContext = &simpleContext{defaultIntSize: INT8}
+
+func Default() Context {
+	return defaultContext
+}
+
+type Context interface {
+	getDefaultIntSize() intsize.IntSize
+}
+
+func IntSize(size intsize.IntSize) Context {
+	return &simpleContext{defaultIntSize: size}
+}
+
+type simpleContext struct {
+	defaultIntSize intsize.IntSize
+}
+
+func (c simpleContext) getDefaultIntSize() intsize.IntSize {
+	return c.defaultIntSize
+}
+
+func (p *Parser) parseWithDepth(
+	ctx Context, depth int, sql string,
+) (stmts tree.StatementList, err error) {
 	p.scanner.init(sql)
+	switch ctx.getDefaultIntSize() {
+	case intsize.INT4:
+		p.scanner.defaultIntType = coltypes.Int4
+	case intsize.Unknown, intsize.INT8:
+		p.scanner.defaultIntType = coltypes.Int8
+	default:
+		return nil, errors.Errorf("unsupported default int size: %v", ctx.getDefaultIntSize())
+	}
+
 	if p.parserImpl.Parse(&p.scanner) != 0 {
 		var err *pgerror.Error
 		if feat := p.scanner.lastError.unimplementedFeature; feat != "" {
@@ -83,19 +118,19 @@ func unaryNegation(e tree.Expr) tree.Expr {
 }
 
 // Parse parses a sql statement string and returns a list of Statements.
-func Parse(sql string) (tree.StatementList, error) {
-	return parseWithDepth(1, sql)
+func Parse(ctx Context, sql string) (tree.StatementList, error) {
+	return parseWithDepth(ctx, 1, sql)
 }
 
-func parseWithDepth(depth int, sql string) (tree.StatementList, error) {
+func parseWithDepth(ctx Context, depth int, sql string) (tree.StatementList, error) {
 	var p Parser
-	return p.parseWithDepth(depth+1, sql)
+	return p.parseWithDepth(ctx, depth+1, sql)
 }
 
 // ParseOne parses a sql statement string, ensuring that it contains only a
 // single statement, and returns that Statement.
-func ParseOne(sql string) (tree.Statement, error) {
-	stmts, err := parseWithDepth(1, sql)
+func ParseOne(ctx Context, sql string) (tree.Statement, error) {
+	stmts, err := parseWithDepth(ctx, 1, sql)
 	if err != nil {
 		return nil, err
 	}
@@ -109,7 +144,7 @@ func ParseOne(sql string) (tree.Statement, error) {
 func ParseTableNameWithIndex(sql string) (tree.TableNameWithIndex, error) {
 	// We wrap the name we want to parse into a dummy statement since our parser
 	// can only parse full statements.
-	stmt, err := ParseOne(fmt.Sprintf("ALTER INDEX %s RENAME TO x", sql))
+	stmt, err := ParseOne(Default(), fmt.Sprintf("ALTER INDEX %s RENAME TO x", sql))
 	if err != nil {
 		return tree.TableNameWithIndex{}, err
 	}
@@ -124,7 +159,7 @@ func ParseTableNameWithIndex(sql string) (tree.TableNameWithIndex, error) {
 func ParseTableName(sql string) (*tree.TableName, error) {
 	// We wrap the name we want to parse into a dummy statement since our parser
 	// can only parse full statements.
-	stmt, err := ParseOne(fmt.Sprintf("ALTER TABLE %s RENAME TO x", sql))
+	stmt, err := ParseOne(Default(), fmt.Sprintf("ALTER TABLE %s RENAME TO x", sql))
 	if err != nil {
 		return nil, err
 	}
@@ -136,8 +171,8 @@ func ParseTableName(sql string) (*tree.TableName, error) {
 }
 
 // parseExprs parses one or more sql expressions.
-func parseExprs(exprs []string) (tree.Exprs, error) {
-	stmt, err := ParseOne(fmt.Sprintf("SET ROW (%s)", strings.Join(exprs, ",")))
+func parseExprs(ctx Context, exprs []string) (tree.Exprs, error) {
+	stmt, err := ParseOne(ctx, fmt.Sprintf("SET ROW (%s)", strings.Join(exprs, ",")))
 	if err != nil {
 		return nil, err
 	}
@@ -149,16 +184,16 @@ func parseExprs(exprs []string) (tree.Exprs, error) {
 }
 
 // ParseExprs is a short-hand for parseExprs(sql)
-func ParseExprs(sql []string) (tree.Exprs, error) {
+func ParseExprs(ctx Context, sql []string) (tree.Exprs, error) {
 	if len(sql) == 0 {
 		return tree.Exprs{}, nil
 	}
-	return parseExprs(sql)
+	return parseExprs(ctx, sql)
 }
 
 // ParseExpr is a short-hand for parseExprs([]string{sql})
-func ParseExpr(sql string) (tree.Expr, error) {
-	exprs, err := parseExprs([]string{sql})
+func ParseExpr(ctx Context, sql string) (tree.Expr, error) {
+	exprs, err := parseExprs(ctx, []string{sql})
 	if err != nil {
 		return nil, err
 	}
@@ -170,7 +205,7 @@ func ParseExpr(sql string) (tree.Expr, error) {
 
 // ParseType parses a column type.
 func ParseType(sql string) (coltypes.CastTargetType, error) {
-	expr, err := ParseExpr(fmt.Sprintf("1::%s", sql))
+	expr, err := ParseExpr(Default(), fmt.Sprintf("1::%s", sql))
 	if err != nil {
 		return nil, err
 	}

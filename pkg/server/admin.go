@@ -1285,7 +1285,7 @@ func (s *adminServer) QueryPlan(
 
 	// As long as there's only one query provided it's safe to construct the
 	// explain query.
-	stmts, err := parser.Parse(req.Query)
+	stmts, err := parser.Parse(parser.Default(), req.Query)
 	if err != nil {
 		return nil, s.serverError(err)
 	}

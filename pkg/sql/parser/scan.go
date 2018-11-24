@@ -23,6 +23,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"github.com/cockroachdb/cockroach/pkg/sql/coltypes"
 	"github.com/cockroachdb/cockroach/pkg/sql/lex"
 	"github.com/cockroachdb/cockroach/pkg/sql/pgwire/pgerror"
 	"github.com/cockroachdb/cockroach/pkg/sql/sem/tree"
@@ -48,6 +49,11 @@ type Scanner struct {
 	stmts []tree.Statement
 
 	initialized bool
+
+	// defaultIntType is a hack to support transitioning from
+	// INT := INT8 to INT := INT4.
+	// https://github.com/cockroachdb/cockroach/issues/26925
+	defaultIntType coltypes.T
 }
 
 // scanErr holds error state for a Scanner.

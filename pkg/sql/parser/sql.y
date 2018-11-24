@@ -6561,11 +6561,13 @@ opt_numeric_modifiers:
 numeric:
   INT
   {
-    $$.val = coltypes.Int
+    // https://github.com/cockroachdb/cockroach/issues/26925
+    $$.val = sqllex.(*Scanner).defaultIntType
   }
 | INTEGER
   {
-    $$.val = coltypes.Int
+    // https://github.com/cockroachdb/cockroach/issues/26925
+    $$.val = sqllex.(*Scanner).defaultIntType
   }
 | INT2
   {

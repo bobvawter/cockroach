@@ -20,6 +20,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/cockroachdb/cockroach/pkg/sql/sqlbase/intsize"
 	"github.com/cockroachdb/cockroach/pkg/storage/engine/enginepb"
 	"github.com/cockroachdb/cockroach/pkg/util/duration"
 )
@@ -88,6 +89,8 @@ type SessionData struct {
 	// identifier `cockroach_restart` in order use a restartable
 	// transaction.
 	ForceSavepointRestart bool
+	// DefaultIntSize controls the interpretation of the INT type.
+	DefaultIntSize intsize.IntSize
 }
 
 // DataConversionConfig contains the parameters that influence

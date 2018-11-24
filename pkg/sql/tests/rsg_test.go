@@ -50,7 +50,7 @@ var (
 
 func parseStatementList(sql string) (tree.StatementList, error) {
 	var p parser.Parser
-	return p.Parse(sql)
+	return p.Parse(parser.Default(), sql)
 }
 
 func verifyFormat(sql string) error {
