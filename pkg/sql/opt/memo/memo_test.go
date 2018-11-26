@@ -55,7 +55,7 @@ func TestMemoInit(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	stmt, err := parser.ParseOne("SELECT * FROM abc WHERE $1=10")
+	stmt, err := parser.ParseOne(parser.Default(), "SELECT * FROM abc WHERE $1=10")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -110,7 +110,7 @@ func TestMemoIsStale(t *testing.T) {
 	evalCtx.SessionData.Database = "t"
 	evalCtx.SessionData.SearchPath = sessiondata.MakeSearchPath(searchPath)
 
-	stmt, err := parser.ParseOne("SELECT a, b+1 FROM abcview WHERE c='foo'")
+	stmt, err := parser.ParseOne(parser.Default(), "SELECT a, b+1 FROM abcview WHERE c='foo'")
 	if err != nil {
 		t.Fatal(err)
 	}

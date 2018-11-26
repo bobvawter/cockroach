@@ -171,7 +171,7 @@ func (n *alterTableNode) startExec(params runParams) error {
 			}
 
 		case *tree.AlterTableAddConstraint:
-			info, err := n.tableDesc.GetConstraintInfo(params.ctx, nil)
+			info, err := n.tableDesc.GetConstraintInfo(params.ctx, params.EvalContext(), nil)
 			if err != nil {
 				return err
 			}
@@ -399,7 +399,7 @@ func (n *alterTableNode) startExec(params runParams) error {
 			// Drop check constraints which reference the column.
 			validChecks := n.tableDesc.Checks[:0]
 			for _, check := range n.tableDesc.Checks {
-				if used, err := check.UsesColumn(n.tableDesc.TableDesc(), col.ID); err != nil {
+				if used, err := check.UsesColumn(params.EvalContext(), n.tableDesc.TableDesc(), col.ID); err != nil {
 					return err
 				} else if !used {
 					validChecks = append(validChecks, check)
@@ -425,7 +425,7 @@ func (n *alterTableNode) startExec(params runParams) error {
 			}
 
 		case *tree.AlterTableDropConstraint:
-			info, err := n.tableDesc.GetConstraintInfo(params.ctx, nil)
+			info, err := n.tableDesc.GetConstraintInfo(params.ctx, params.EvalContext(), nil)
 			if err != nil {
 				return err
 			}
@@ -465,7 +465,7 @@ func (n *alterTableNode) startExec(params runParams) error {
 			}
 
 		case *tree.AlterTableValidateConstraint:
-			info, err := n.tableDesc.GetConstraintInfo(params.ctx, nil)
+			info, err := n.tableDesc.GetConstraintInfo(params.ctx, params.EvalContext(), nil)
 			if err != nil {
 				return err
 			}
@@ -595,7 +595,7 @@ func (n *alterTableNode) startExec(params runParams) error {
 		return nil
 	}
 
-	if err := n.tableDesc.AllocateIDs(); err != nil {
+	if err := n.tableDesc.AllocateIDs(params.EvalContext()); err != nil {
 		return err
 	}
 

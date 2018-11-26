@@ -194,7 +194,8 @@ func (s LeaseStore) acquire(ctx context.Context, tableID sqlbase.ID) (*tableVers
 
 		// ValidateTable instead of Validate, even though we have a txn available,
 		// so we don't block reads waiting for this table version.
-		if err := table.ValidateTable(s.execCfg.Settings); err != nil {
+		if err := table.ValidateTable(&tree.EvalContext{
+			SessionData: s.execCfg.InternalExecutor.sessionData, Settings: s.execCfg.Settings}); err != nil {
 			return err
 		}
 
@@ -412,7 +413,9 @@ func (s LeaseStore) Publish(
 			if err := incrementVersion(ctx, tableDesc, txn); err != nil {
 				return err
 			}
-			if err := tableDesc.ValidateTable(s.execCfg.Settings); err != nil {
+			if err := tableDesc.ValidateTable(&tree.EvalContext{
+				SessionData: s.execCfg.InternalExecutor.sessionData,
+				Settings:    s.execCfg.Settings}); err != nil {
 				return err
 			}
 
@@ -1664,7 +1667,8 @@ func (m *LeaseManager) RefreshLeases(s *stop.Stopper, db *client.DB, g *gossip.G
 					case *sqlbase.Descriptor_Table:
 						table := union.Table
 						table.MaybeFillInDescriptor()
-						if err := table.ValidateTable(m.execCfg.Settings); err != nil {
+						if err := table.ValidateTable(&tree.EvalContext{
+							SessionData: m.execCfg.InternalExecutor.sessionData, Settings: m.execCfg.Settings}); err != nil {
 							log.Errorf(ctx, "%s: received invalid table descriptor: %s. Desc: %v",
 								kv.Key, err, table,
 							)

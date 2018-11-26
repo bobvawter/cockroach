@@ -67,7 +67,7 @@ func TestCreateRandomSchema(t *testing.T) {
 		}
 
 		// Reparse the show create table statement that's stored in the database.
-		stmtAst, err := parser.ParseOne(tabStmt)
+		stmtAst, err := parser.ParseOne(parser.Default(), tabStmt)
 		if err != nil {
 			t.Fatalf("error parsing show create table: %s", err)
 		}
@@ -91,7 +91,7 @@ func TestCreateRandomSchema(t *testing.T) {
 		}
 		// Reparse the show create table statement that's stored in the database.
 		var secondStmtAst tree.Statement
-		secondStmtAst, err = parser.ParseOne(secondTabStmt)
+		secondStmtAst, err = parser.ParseOne(parser.Default(), secondTabStmt)
 		if err != nil {
 			t.Fatalf("error parsing show create table: %s", err)
 		}

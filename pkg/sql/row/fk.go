@@ -94,17 +94,19 @@ type tableLookupQueue struct {
 }
 
 func (tl *TableLookup) addCheckHelper(
-	ctx context.Context, analyzeExpr sqlbase.AnalyzeExprFunction,
+	ctx context.Context, evalCtx *tree.EvalContext, analyzeExpr sqlbase.AnalyzeExprFunction,
 ) error {
 	if analyzeExpr == nil {
 		return nil
 	}
 	tableName := tree.MakeUnqualifiedTableName(tree.Name(tl.Table.Name))
 	tl.CheckHelper = &sqlbase.CheckHelper{}
-	return tl.CheckHelper.Init(ctx, analyzeExpr, &tableName, tl.Table)
+	return tl.CheckHelper.Init(ctx, analyzeExpr, evalCtx, &tableName, tl.Table)
 }
 
-func (q *tableLookupQueue) getTable(ctx context.Context, tableID ID) (TableLookup, error) {
+func (q *tableLookupQueue) getTable(
+	ctx context.Context, evalCtx *tree.EvalContext, tableID ID,
+) (TableLookup, error) {
 	if tableLookup, exists := q.tableLookups[tableID]; exists {
 		return tableLookup, nil
 	}
@@ -116,7 +118,7 @@ func (q *tableLookupQueue) getTable(ctx context.Context, tableID ID) (TableLooku
 		if err := q.checkPrivilege(ctx, tableLookup.Table, privilege.SELECT); err != nil {
 			return TableLookup{}, err
 		}
-		if err := tableLookup.addCheckHelper(ctx, q.analyzeExpr); err != nil {
+		if err := tableLookup.addCheckHelper(ctx, evalCtx, q.analyzeExpr); err != nil {
 			return TableLookup{}, err
 		}
 	}
@@ -124,9 +126,11 @@ func (q *tableLookupQueue) getTable(ctx context.Context, tableID ID) (TableLooku
 	return tableLookup, nil
 }
 
-func (q *tableLookupQueue) enqueue(ctx context.Context, tableID ID, usage FKCheck) error {
+func (q *tableLookupQueue) enqueue(
+	ctx context.Context, evalCtx *tree.EvalContext, tableID ID, usage FKCheck,
+) error {
 	// Lookup the table.
-	tableLookup, err := q.getTable(ctx, tableID)
+	tableLookup, err := q.getTable(ctx, evalCtx, tableID)
 	if err != nil {
 		return err
 	}
@@ -182,6 +186,7 @@ func (q *tableLookupQueue) dequeue() (TableLookup, FKCheck, bool) {
 // CheckHelpers are required.
 func TablesNeededForFKs(
 	ctx context.Context,
+	evalCtx *tree.EvalContext,
 	table sqlbase.TableDescriptor,
 	usage FKCheck,
 	lookup TableLookupFunction,
@@ -197,11 +202,11 @@ func TablesNeededForFKs(
 	}
 	// Add the passed in table descriptor to the table lookup.
 	baseTableLookup := TableLookup{Table: &table}
-	if err := baseTableLookup.addCheckHelper(ctx, analyzeExpr); err != nil {
+	if err := baseTableLookup.addCheckHelper(ctx, evalCtx, analyzeExpr); err != nil {
 		return nil, err
 	}
 	queue.tableLookups[table.ID] = baseTableLookup
-	if err := queue.enqueue(ctx, table.ID, usage); err != nil {
+	if err := queue.enqueue(ctx, evalCtx, table.ID, usage); err != nil {
 		return nil, err
 	}
 	for {
@@ -218,7 +223,7 @@ func TablesNeededForFKs(
 		for _, idx := range tableLookup.Table.AllNonDropIndexes() {
 			if curUsage == CheckInserts || curUsage == CheckUpdates {
 				if idx.ForeignKey.IsSet() {
-					if _, err := queue.getTable(ctx, idx.ForeignKey.Table); err != nil {
+					if _, err := queue.getTable(ctx, evalCtx, idx.ForeignKey.Table); err != nil {
 						return nil, err
 					}
 				}
@@ -227,7 +232,7 @@ func TablesNeededForFKs(
 				for _, ref := range idx.ReferencedBy {
 					// The table being referenced is required to know the relationship, so
 					// fetch it here.
-					referencedTableLookup, err := queue.getTable(ctx, ref.Table)
+					referencedTableLookup, err := queue.getTable(ctx, evalCtx, ref.Table)
 					if err != nil {
 						return nil, err
 					}
@@ -252,7 +257,7 @@ func TablesNeededForFKs(
 							// There is no need to check any other relationships.
 							continue
 						}
-						if err := queue.enqueue(ctx, referencedTableLookup.Table.ID, nextUsage); err != nil {
+						if err := queue.enqueue(ctx, evalCtx, referencedTableLookup.Table.ID, nextUsage); err != nil {
 							return nil, err
 						}
 					} else {
@@ -261,7 +266,7 @@ func TablesNeededForFKs(
 							referencedIdx.ForeignKey.OnUpdate == sqlbase.ForeignKeyReference_SET_DEFAULT ||
 							referencedIdx.ForeignKey.OnUpdate == sqlbase.ForeignKeyReference_SET_NULL {
 							if err := queue.enqueue(
-								ctx, referencedTableLookup.Table.ID, CheckUpdates,
+								ctx, evalCtx, referencedTableLookup.Table.ID, CheckUpdates,
 							); err != nil {
 								return nil, err
 							}

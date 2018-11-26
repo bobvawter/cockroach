@@ -51,7 +51,7 @@ func MakeDefaultExprs(
 			exprStrings = append(exprStrings, *col.DefaultExpr)
 		}
 	}
-	exprs, err := parser.ParseExprs(exprStrings)
+	exprs, err := parser.ParseExprs(parser.ForEval(evalCtx), exprStrings)
 	if err != nil {
 		return nil, err
 	}

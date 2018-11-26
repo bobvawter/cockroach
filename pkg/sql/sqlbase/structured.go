@@ -560,7 +560,7 @@ func (desc *TableDescriptor) maybeUpgradeToFamilyFormatVersion() bool {
 
 // AllocateIDs allocates column, family, and index ids for any column, family,
 // or index which has an ID of 0.
-func (desc *TableDescriptor) AllocateIDs() error {
+func (desc *TableDescriptor) AllocateIDs(evalCtx *tree.EvalContext) error {
 	// Only physical tables can have / need a primary key.
 	if desc.IsPhysicalTable() {
 		if err := desc.ensurePrimaryKey(); err != nil {
@@ -612,7 +612,7 @@ func (desc *TableDescriptor) AllocateIDs() error {
 	if desc.ID == 0 {
 		desc.ID = keys.MinUserDescID
 	}
-	err := desc.ValidateTable(nil)
+	err := desc.ValidateTable(evalCtx)
 	desc.ID = savedID
 	return err
 }
@@ -897,9 +897,9 @@ func (desc *TableDescriptor) allocateColumnFamilyIDs(columnNames map[string]Colu
 // Validate validates that the table descriptor is well formed. Checks include
 // both single table and cross table invariants.
 func (desc *TableDescriptor) Validate(
-	ctx context.Context, txn *client.Txn, st *cluster.Settings,
+	ctx context.Context, evalCtx *tree.EvalContext, txn *client.Txn,
 ) error {
-	err := desc.ValidateTable(st)
+	err := desc.ValidateTable(evalCtx)
 	if err != nil {
 		return err
 	}
@@ -1052,7 +1052,7 @@ func (desc *TableDescriptor) validateCrossReferences(ctx context.Context, txn *c
 // are consistent. Use Validate to validate that cross-table references are
 // correct.
 // If version is supplied, the descriptor is checked for version incompatibilities.
-func (desc *TableDescriptor) ValidateTable(st *cluster.Settings) error {
+func (desc *TableDescriptor) ValidateTable(evalCtx *tree.EvalContext) error {
 	if err := validateName(desc.Name, "table"); err != nil {
 		return err
 	}
@@ -1095,7 +1095,7 @@ func (desc *TableDescriptor) ValidateTable(st *cluster.Settings) error {
 		return ErrMissingColumns
 	}
 
-	if err := desc.CheckUniqueConstraints(); err != nil {
+	if err := desc.CheckUniqueConstraints(evalCtx); err != nil {
 		return err
 	}
 
@@ -1131,6 +1131,7 @@ func (desc *TableDescriptor) ValidateTable(st *cluster.Settings) error {
 		}
 	}
 
+	st := evalCtx.Settings
 	if st != nil && st.Version.IsInitialized() {
 		if !st.Version.IsMinSupported(cluster.VersionBitArrayColumns) {
 			for _, def := range desc.Columns {
@@ -2326,13 +2327,15 @@ func (desc *ColumnDescriptor) SQLString() string {
 // TODO(nvanbenschoten): we can remove this in v2.1 and replace it with a sql
 // migration to backfill all TableDescriptor_CheckConstraint.ColumnIDs slices.
 // See #22322.
-func (cc *TableDescriptor_CheckConstraint) ColumnsUsed(desc *TableDescriptor) ([]ColumnID, error) {
+func (cc *TableDescriptor_CheckConstraint) ColumnsUsed(
+	ctx *tree.EvalContext, desc *TableDescriptor,
+) ([]ColumnID, error) {
 	if len(cc.ColumnIDs) > 0 {
 		// Already populated.
 		return cc.ColumnIDs, nil
 	}
 
-	parsed, err := parser.ParseExpr(cc.Expr)
+	parsed, err := parser.ParseExpr(parser.ForEval(ctx), cc.Expr)
 	if err != nil {
 		return nil, errors.Wrapf(err, "could not parse check constraint %s", cc.Expr)
 	}
@@ -2370,9 +2373,9 @@ func (cc *TableDescriptor_CheckConstraint) ColumnsUsed(desc *TableDescriptor) ([
 
 // UsesColumn returns whether the check constraint uses the specified column.
 func (cc *TableDescriptor_CheckConstraint) UsesColumn(
-	desc *TableDescriptor, colID ColumnID,
+	ctx *tree.EvalContext, desc *TableDescriptor, colID ColumnID,
 ) (bool, error) {
-	colsUsed, err := cc.ColumnsUsed(desc)
+	colsUsed, err := cc.ColumnsUsed(ctx, desc)
 	if err != nil {
 		return false, err
 	}

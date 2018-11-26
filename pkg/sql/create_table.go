@@ -168,7 +168,7 @@ func (n *createTableNode) startExec(params runParams) error {
 		}
 	}
 
-	if err := desc.Validate(params.ctx, params.p.txn, params.EvalContext().Settings); err != nil {
+	if err := desc.Validate(params.ctx, params.EvalContext(), params.p.txn); err != nil {
 		return err
 	}
 
@@ -221,7 +221,7 @@ func (n *createTableNode) startExec(params runParams) error {
 
 		// Prepare the rowID expression.
 		defExprSQL := *desc.Columns[pkColIdx].DefaultExpr
-		defExpr, err := parser.ParseExpr(defExprSQL)
+		defExpr, err := parser.ParseExpr(parser.ForEval(params.EvalContext()), defExprSQL)
 		if err != nil {
 			return err
 		}
@@ -328,7 +328,7 @@ func (p *planner) resolveFK(
 	backrefs map[sqlbase.ID]*sqlbase.MutableTableDescriptor,
 	ts FKTableState,
 ) error {
-	return ResolveFK(ctx, p.txn, p, tbl, d, backrefs, ts)
+	return ResolveFK(ctx, p.EvalContext(), p.txn, p, tbl, d, backrefs, ts)
 }
 
 func qualifyFKColErrorWithDB(
@@ -382,6 +382,7 @@ const (
 // but if nil, will result in unqualified names in those errors.
 func ResolveFK(
 	ctx context.Context,
+	evalCtx *tree.EvalContext,
 	txn *client.Txn,
 	sc SchemaResolver,
 	tbl *sqlbase.MutableTableDescriptor,
@@ -557,7 +558,7 @@ func ResolveFK(
 				return pgerror.NewErrorf(pgerror.CodeInvalidForeignKeyError,
 					"foreign key requires an existing index on columns %s", colNames(srcCols))
 			}
-			added, err := addIndexForFK(tbl, srcCols, constraintName, ref, ts)
+			added, err := addIndexForFK(evalCtx, tbl, srcCols, constraintName, ref, ts)
 			if err != nil {
 				return err
 			}
@@ -595,6 +596,7 @@ func ResolveFK(
 // Adds an index to a table descriptor (that is in the process of being created)
 // that will support using `srcCols` as the referencing (src) side of an FK.
 func addIndexForFK(
+	evalCtx *tree.EvalContext,
 	tbl *sqlbase.MutableTableDescriptor,
 	srcCols []sqlbase.ColumnDescriptor,
 	constraintName string,
@@ -617,7 +619,7 @@ func addIndexForFK(
 		if err := tbl.AddIndex(idx, false); err != nil {
 			return 0, err
 		}
-		if err := tbl.AllocateIDs(); err != nil {
+		if err := tbl.AllocateIDs(evalCtx); err != nil {
 			return 0, err
 		}
 		added := tbl.Indexes[len(tbl.Indexes)-1]
@@ -634,7 +636,7 @@ func addIndexForFK(
 	if err := tbl.AddIndexMutation(idx, sqlbase.DescriptorMutation_ADD); err != nil {
 		return 0, err
 	}
-	if err := tbl.AllocateIDs(); err != nil {
+	if err := tbl.AllocateIDs(evalCtx); err != nil {
 		return 0, err
 	}
 	return tbl.Mutations[len(tbl.Mutations)-1].GetIndex().ID, nil
@@ -900,7 +902,7 @@ func makeTableDescIfAs(
 	// happens to work in gc, but does not work in gccgo.
 	//
 	// See https://github.com/golang/go/issues/23188.
-	err = desc.AllocateIDs()
+	err = desc.AllocateIDs(evalCtx)
 	return desc, err
 }
 
@@ -1020,7 +1022,7 @@ func MakeTableDesc(
 
 	for i, col := range desc.Columns {
 		if col.IsComputed() {
-			expr, err := parser.ParseExpr(*col.ComputeExpr)
+			expr, err := parser.ParseExpr(parser.ForEval(evalCtx), *col.ComputeExpr)
 			if err != nil {
 				return desc, err
 			}
@@ -1122,7 +1124,7 @@ func MakeTableDesc(
 		}
 	}
 
-	if err := desc.AllocateIDs(); err != nil {
+	if err := desc.AllocateIDs(evalCtx); err != nil {
 		return desc, err
 	}
 
@@ -1180,7 +1182,7 @@ func MakeTableDesc(
 			desc.Checks = append(desc.Checks, ck)
 
 		case *tree.ForeignKeyConstraintTableDef:
-			if err := ResolveFK(ctx, txn, fkResolver, &desc, d, affected, NewTable); err != nil {
+			if err := ResolveFK(ctx, evalCtx, txn, fkResolver, &desc, d, affected, NewTable); err != nil {
 				return desc, err
 			}
 		default:
@@ -1192,7 +1194,7 @@ func MakeTableDesc(
 	// happens to work in gc, but does not work in gccgo.
 	//
 	// See https://github.com/golang/go/issues/23188.
-	err := desc.AllocateIDs()
+	err := desc.AllocateIDs(evalCtx)
 	return desc, err
 }
 

@@ -135,7 +135,7 @@ func (b *Builder) buildView(view opt.View, inScope *scope) (outScope *scope) {
 	// Check whether view has already been parsed, and if not, parse now.
 	sel, ok := b.views[view]
 	if !ok {
-		stmt, err := parser.ParseOne(view.Query())
+		stmt, err := parser.ParseOne(parser.ForEval(b.evalCtx), view.Query())
 		if err != nil {
 			wrapped := errors.Wrapf(err, "failed to parse underlying query from view %q", view.Name())
 			panic(builderError{wrapped})

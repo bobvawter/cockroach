@@ -107,7 +107,7 @@ func (n *renameColumnNode) startExec(params runParams) error {
 	}
 
 	renameIn := func(expression string) (string, error) {
-		parsed, err := parser.ParseExpr(expression)
+		parsed, err := parser.ParseExpr(parser.ForEval(p.EvalContext()), expression)
 		if err != nil {
 			return "", err
 		}
@@ -143,7 +143,7 @@ func (n *renameColumnNode) startExec(params runParams) error {
 	// Rename the column in the indexes.
 	tableDesc.RenameColumnDescriptor(col, string(n.n.NewName))
 
-	if err := tableDesc.Validate(ctx, p.txn, p.EvalContext().Settings); err != nil {
+	if err := tableDesc.Validate(ctx, p.EvalContext(), p.txn); err != nil {
 		return err
 	}
 

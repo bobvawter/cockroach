@@ -79,18 +79,20 @@ type SchemaAccessor interface {
 	// GetDatabaseDesc looks up a database by name and returns its
 	// descriptor. If the database is not found and required is true,
 	// an error is returned; otherwise a nil reference is returned.
-	GetDatabaseDesc(ctx context.Context, txn *client.Txn, dbName string, flags DatabaseLookupFlags) (*DatabaseDescriptor, error)
+	GetDatabaseDesc(ctx context.Context, evalCtx *tree.EvalContext,
+		txn *client.Txn, dbName string, flags DatabaseLookupFlags) (*DatabaseDescriptor, error)
 
 	// IsValidSchema returns true if the given schema name is valid for the given database.
-	IsValidSchema(db *DatabaseDescriptor, scName string) bool
+	IsValidSchema(evalCtx *tree.EvalContext, db *DatabaseDescriptor, scName string) bool
 
 	// GetObjectNames returns the list of all objects in the given
 	// database and schema.
 	// TODO(whomever): when separate schemas are supported, this
 	// API should be extended to use schema descriptors.
-	GetObjectNames(ctx context.Context, txn *client.Txn, db *DatabaseDescriptor, scName string, flags DatabaseListFlags) (TableNames, error)
+	GetObjectNames(ctx context.Context, evalCtx *tree.EvalContext, txn *client.Txn,
+		db *DatabaseDescriptor, scName string, flags DatabaseListFlags) (TableNames, error)
 
-	// GetObjectDesc looks up an objcet by name and returns both its
+	// GetObjectDesc looks up an object by name and returns both its
 	// descriptor and that of its parent database. If the object is not
 	// found and flags.required is true, an error is returned, otherwise
 	// a nil reference is returned.
@@ -100,7 +102,8 @@ type SchemaAccessor interface {
 	// It is not guaranteed to be non-nil even if the first return value
 	// is non-nil.  Callers that need a database descriptor can use that
 	// to avoid an extra roundtrip through a DatabaseAccessor.
-	GetObjectDesc(ctx context.Context, txn *client.Txn, name *ObjectName, flags ObjectLookupFlags) (ObjectDescriptor, *DatabaseDescriptor, error)
+	GetObjectDesc(ctx context.Context, evalCtx *tree.EvalContext, txn *client.Txn,
+		name *ObjectName, flags ObjectLookupFlags) (ObjectDescriptor, *DatabaseDescriptor, error)
 }
 
 // CommonLookupFlags is the common set of flags for the various accessor interfaces.

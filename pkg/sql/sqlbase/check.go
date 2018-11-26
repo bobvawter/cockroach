@@ -51,6 +51,7 @@ type AnalyzeExprFunction func(
 func (c *CheckHelper) Init(
 	ctx context.Context,
 	analyzeExpr AnalyzeExprFunction,
+	evalCtx *tree.EvalContext,
 	tn *tree.TableName,
 	tableDesc *TableDescriptor,
 ) error {
@@ -68,7 +69,7 @@ func (c *CheckHelper) Init(
 	for i, check := range tableDesc.Checks {
 		exprStrings[i] = check.Expr
 	}
-	exprs, err := parser.ParseExprs(exprStrings)
+	exprs, err := parser.ParseExprs(parser.ForEval(evalCtx), exprStrings)
 	if err != nil {
 		return err
 	}

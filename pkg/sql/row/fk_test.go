@@ -22,6 +22,9 @@ import (
 	"sort"
 	"testing"
 
+	"github.com/cockroachdb/cockroach/pkg/sql/sem/tree"
+	"github.com/cockroachdb/cockroach/pkg/sql/sessiondata"
+	"github.com/cockroachdb/cockroach/pkg/sql/sqlbase/intsize"
 	"github.com/kr/pretty"
 	"github.com/pkg/errors"
 
@@ -187,6 +190,7 @@ func TestTablesNeededForFKs(t *testing.T) {
 	test := func(t *testing.T, usage FKCheck, expectedIDs []ID) {
 		tableLookups, err := TablesNeededForFKs(
 			context.TODO(),
+			&tree.EvalContext{SessionData: &sessiondata.SessionData{DefaultIntSize: intsize.INT8}},
 			*xDesc,
 			usage,
 			lookup,

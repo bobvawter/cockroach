@@ -71,7 +71,7 @@ func newSQLCheckConstraintCheckOperation(
 // then runs in the distSQL execution engine.
 func (o *sqlCheckConstraintCheckOperation) Start(params runParams) error {
 	ctx := params.ctx
-	expr, err := parser.ParseExpr(o.checkDesc.Expr)
+	expr, err := parser.ParseExpr(parser.ForEval(params.EvalContext()), o.checkDesc.Expr)
 	if err != nil {
 		return err
 	}

@@ -55,7 +55,7 @@ type virtualSchema struct {
 type virtualSchemaDef interface {
 	getSchema() string
 	initVirtualTableDesc(
-		ctx context.Context, st *cluster.Settings,
+		ctx context.Context, evalCtx *tree.EvalContext, st *cluster.Settings,
 	) (sqlbase.TableDescriptor, error)
 }
 
@@ -80,6 +80,8 @@ type virtualSchemaTable struct {
 	delegate func(ctx context.Context, p *planner, db *DatabaseDescriptor) (planNode, error)
 }
 
+var _ virtualSchemaDef = &virtualSchemaTable{}
+
 // virtualSchemaView represents a view within a virtualSchema
 type virtualSchemaView struct {
 	schema        string
@@ -93,9 +95,9 @@ func (t virtualSchemaTable) getSchema() string {
 
 // initVirtualTableDesc is part of the virtualSchemaDef interface.
 func (t virtualSchemaTable) initVirtualTableDesc(
-	ctx context.Context, st *cluster.Settings,
+	ctx context.Context, evalCtx *tree.EvalContext, st *cluster.Settings,
 ) (sqlbase.TableDescriptor, error) {
-	stmt, err := parser.ParseOne(t.schema)
+	stmt, err := parser.ParseOne(parser.ForEval(evalCtx), t.schema)
 	if err != nil {
 		return sqlbase.TableDescriptor{}, err
 	}
@@ -135,9 +137,9 @@ func (v virtualSchemaView) getSchema() string {
 
 // initVirtualTableDesc is part of the virtualSchemaDef interface.
 func (v virtualSchemaView) initVirtualTableDesc(
-	ctx context.Context, st *cluster.Settings,
+	ctx context.Context, evalCtx *tree.EvalContext, st *cluster.Settings,
 ) (sqlbase.TableDescriptor, error) {
-	stmt, err := parser.ParseOne(v.schema)
+	stmt, err := parser.ParseOne(parser.ForEval(evalCtx), v.schema)
 	if err != nil {
 		return sqlbase.TableDescriptor{}, err
 	}
@@ -226,7 +228,7 @@ func (e virtualDefEntry) getPlanInfo() (sqlbase.ResultColumns, virtualTableConst
 		var dbDesc *DatabaseDescriptor
 		if dbName != "" {
 			var err error
-			dbDesc, err = p.LogicalSchemaAccessor().GetDatabaseDesc(ctx, p.txn, dbName,
+			dbDesc, err = p.LogicalSchemaAccessor().GetDatabaseDesc(ctx, p.EvalContext(), p.txn, dbName,
 				DatabaseLookupFlags{required: true})
 			if err != nil {
 				return nil, err
@@ -290,7 +292,7 @@ func (e virtualDefEntry) getPlanInfo() (sqlbase.ResultColumns, virtualTableConst
 
 // NewVirtualSchemaHolder creates a new VirtualSchemaHolder.
 func NewVirtualSchemaHolder(
-	ctx context.Context, st *cluster.Settings,
+	ctx context.Context, evalCtx *tree.EvalContext, st *cluster.Settings,
 ) (*VirtualSchemaHolder, error) {
 	vs := &VirtualSchemaHolder{
 		entries:      make(map[string]virtualSchemaEntry, len(virtualSchemas)),
@@ -303,7 +305,7 @@ func NewVirtualSchemaHolder(
 		orderedDefNames := make([]string, 0, len(schema.tableDefs))
 
 		for _, def := range schema.tableDefs {
-			tableDesc, err := def.initVirtualTableDesc(ctx, st)
+			tableDesc, err := def.initVirtualTableDesc(ctx, evalCtx, st)
 
 			if err != nil {
 				return nil, errors.Wrapf(err, "failed to initialize %s", def.getSchema())

@@ -532,7 +532,7 @@ func (h *harness) runUsingAPI(tb testing.TB, bmType BenchmarkType, usePrepared b
 	var stmt tree.Statement
 	var err error
 	if !usePrepared {
-		stmt, err = parser.ParseOne(h.query.query)
+		stmt, err = parser.ParseOne(parser.Default(), h.query.query)
 		if err != nil {
 			tb.Fatalf("%v", err)
 		}

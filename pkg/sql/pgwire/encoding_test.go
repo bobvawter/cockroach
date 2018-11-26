@@ -58,7 +58,7 @@ func TestEncodings(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.SQL, func(t *testing.T) {
 			// Convert the SQL expression to a Datum.
-			stmt, err := parser.ParseOne(fmt.Sprintf("SELECT %s", tc.SQL))
+			stmt, err := parser.ParseOne(evalCtx.ParserCtx(), fmt.Sprintf("SELECT %s", tc.SQL))
 			if err != nil {
 				t.Fatal(err)
 			}

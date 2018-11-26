@@ -239,7 +239,7 @@ type tableLookupFn func(ID) (*TableDescriptor, error)
 
 // GetConstraintInfo returns a summary of all constraints on the table.
 func (desc *TableDescriptor) GetConstraintInfo(
-	ctx context.Context, txn *client.Txn,
+	ctx context.Context, evalCtx *tree.EvalContext, txn *client.Txn,
 ) (map[string]ConstraintDetail, error) {
 	var tableLookup tableLookupFn
 	if txn != nil {
@@ -247,28 +247,28 @@ func (desc *TableDescriptor) GetConstraintInfo(
 			return GetTableDescFromID(ctx, txn, id)
 		}
 	}
-	return desc.collectConstraintInfo(tableLookup)
+	return desc.collectConstraintInfo(evalCtx, tableLookup)
 }
 
 // GetConstraintInfoWithLookup returns a summary of all constraints on the
 // table using the provided function to fetch a TableDescriptor from an ID.
 func (desc *TableDescriptor) GetConstraintInfoWithLookup(
-	tableLookup tableLookupFn,
+	evalCtx *tree.EvalContext, tableLookup tableLookupFn,
 ) (map[string]ConstraintDetail, error) {
-	return desc.collectConstraintInfo(tableLookup)
+	return desc.collectConstraintInfo(evalCtx, tableLookup)
 }
 
 // CheckUniqueConstraints returns a non-nil error if a descriptor contains two
 // constraints with the same name.
-func (desc *TableDescriptor) CheckUniqueConstraints() error {
-	_, err := desc.collectConstraintInfo(nil)
+func (desc *TableDescriptor) CheckUniqueConstraints(evalCtx *tree.EvalContext) error {
+	_, err := desc.collectConstraintInfo(evalCtx, nil)
 	return err
 }
 
 // if `tableLookup` is non-nil, provide a full summary of constraints, otherwise just
 // check that constraints have unique names.
 func (desc *TableDescriptor) collectConstraintInfo(
-	tableLookup tableLookupFn,
+	ctx *tree.EvalContext, tableLookup tableLookupFn,
 ) (map[string]ConstraintDetail, error) {
 	info := make(map[string]ConstraintDetail)
 
@@ -358,7 +358,7 @@ func (desc *TableDescriptor) collectConstraintInfo(
 			detail.Details = c.Expr
 			detail.CheckConstraint = c
 
-			colsUsed, err := c.ColumnsUsed(desc)
+			colsUsed, err := c.ColumnsUsed(ctx, desc)
 			if err != nil {
 				return nil, errors.Wrapf(err, "error computing columns used in check constraint %q", c.Name)
 			}

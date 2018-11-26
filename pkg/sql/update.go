@@ -102,6 +102,7 @@ func (p *planner) Update(
 	// Determine what are the foreign key tables that are involved in the update.
 	fkTables, err := row.TablesNeededForFKs(
 		ctx,
+		p.EvalContext(),
 		*desc,
 		row.CheckUpdates,
 		p.LookupTableByID,
@@ -219,7 +220,7 @@ func (p *planner) Update(
 			requestedColSet.Add(int(col.ID))
 		}
 		for _, ck := range desc.Checks {
-			cols, err := ck.ColumnsUsed(desc)
+			cols, err := ck.ColumnsUsed(p.EvalContext(), desc)
 			if err != nil {
 				return nil, err
 			}

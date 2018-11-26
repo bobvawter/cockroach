@@ -1415,7 +1415,7 @@ func BenchmarkConvertRecord(b *testing.B) {
 	}
 	b.SetBytes(120) // Raw input size. With 8 indexes, expect more on output side.
 
-	stmt, err := parser.ParseOne(`CREATE TABLE lineitem (
+	stmt, err := parser.ParseOne(parser.Default(), `CREATE TABLE lineitem (
 		l_orderkey      INTEGER NOT NULL,
 		l_partkey       INTEGER NOT NULL,
 		l_suppkey       INTEGER NOT NULL,

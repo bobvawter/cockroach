@@ -78,7 +78,7 @@ func RunResolveQualifiedStarTest(t *testing.T, ct ColumnItemResolverTester) {
 	for _, tc := range testCases {
 		t.Run(tc.in, func(t *testing.T) {
 			tnout, csout, err := func() (string, string, error) {
-				stmt, err := parser.ParseOne(fmt.Sprintf("SELECT %s", tc.in))
+				stmt, err := parser.ParseOne(parser.Default(), fmt.Sprintf("SELECT %s", tc.in))
 				if err != nil {
 					return "", "", err
 				}
@@ -157,7 +157,7 @@ func RunResolveColumnItemTest(t *testing.T, ct ColumnItemResolverTester) {
 	for _, tc := range testCases {
 		t.Run(tc.in, func(t *testing.T) {
 			out, err := func() (string, error) {
-				stmt, err := parser.ParseOne(fmt.Sprintf("SELECT %s", tc.in))
+				stmt, err := parser.ParseOne(parser.Default(), fmt.Sprintf("SELECT %s", tc.in))
 				if err != nil {
 					return "", err
 				}

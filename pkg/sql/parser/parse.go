@@ -30,6 +30,7 @@ import (
 	"github.com/cockroachdb/cockroach/pkg/sql/coltypes"
 	"github.com/cockroachdb/cockroach/pkg/sql/pgwire/pgerror"
 	"github.com/cockroachdb/cockroach/pkg/sql/sem/tree"
+	"github.com/cockroachdb/cockroach/pkg/sql/sessiondata"
 	"github.com/cockroachdb/cockroach/pkg/sql/sqlbase/intsize"
 	"github.com/pkg/errors"
 )
@@ -58,6 +59,24 @@ type Context interface {
 
 func IntSize(size intsize.IntSize) Context {
 	return &simpleContext{defaultIntSize: size}
+}
+
+// ForEval returns a parser.Context that has been configured per
+// the EvalContext's session data. This function is nil-safe.
+func ForEval(ctx *tree.EvalContext) Context {
+	if ctx == nil {
+		return Default()
+	}
+	return ForSession(ctx.SessionData)
+}
+
+// ForEval returns a parser.Context that has been configured per
+// the SessionData. This function is nil-safe.
+func ForSession(data *sessiondata.SessionData) Context {
+	if data == nil {
+		return Default()
+	}
+	return IntSize(data.DefaultIntSize)
 }
 
 type simpleContext struct {
@@ -204,8 +223,8 @@ func ParseExpr(ctx Context, sql string) (tree.Expr, error) {
 }
 
 // ParseType parses a column type.
-func ParseType(sql string) (coltypes.CastTargetType, error) {
-	expr, err := ParseExpr(Default(), fmt.Sprintf("1::%s", sql))
+func ParseType(ctx Context, sql string) (coltypes.CastTargetType, error) {
+	expr, err := ParseExpr(ctx, fmt.Sprintf("1::%s", sql))
 	if err != nil {
 		return nil, err
 	}

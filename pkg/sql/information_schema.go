@@ -402,7 +402,7 @@ CREATE TABLE information_schema.constraint_column_usage (
 			table *sqlbase.TableDescriptor,
 			tableLookup tableLookupFn,
 		) error {
-			conInfo, err := table.GetConstraintInfoWithLookup(tableLookup.getTableByID)
+			conInfo, err := table.GetConstraintInfoWithLookup(p.EvalContext(), tableLookup.getTableByID)
 			if err != nil {
 				return err
 			}
@@ -462,7 +462,7 @@ CREATE TABLE information_schema.key_column_usage (
 			table *sqlbase.TableDescriptor,
 			tableLookup tableLookupFn,
 		) error {
-			conInfo, err := table.GetConstraintInfoWithLookup(tableLookup.getTableByID)
+			conInfo, err := table.GetConstraintInfoWithLookup(p.EvalContext(), tableLookup.getTableByID)
 			if err != nil {
 				return err
 			}
@@ -1001,7 +1001,7 @@ CREATE TABLE information_schema.table_constraints (
 				table *sqlbase.TableDescriptor,
 				tableLookup tableLookupFn,
 			) error {
-				conInfo, err := table.GetConstraintInfoWithLookup(tableLookup.getTableByID)
+				conInfo, err := table.GetConstraintInfoWithLookup(p.EvalContext(), tableLookup.getTableByID)
 				if err != nil {
 					return err
 				}

@@ -39,7 +39,7 @@ func TestDetachMemo(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	stmt, err := parser.ParseOne("SELECT * FROM abc WHERE c=$1")
+	stmt, err := parser.ParseOne(parser.Default(), "SELECT * FROM abc WHERE c=$1")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -64,7 +64,7 @@ func TestDetachMemo(t *testing.T) {
 	semaCtx.Placeholders.Clear()
 	o.Init(&evalCtx)
 
-	stmt2, err := parser.ParseOne("SELECT a=$1 FROM abc")
+	stmt2, err := parser.ParseOne(parser.Default(), "SELECT a=$1 FROM abc")
 	if err != nil {
 		t.Fatal(err)
 	}

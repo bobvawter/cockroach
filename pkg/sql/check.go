@@ -32,7 +32,7 @@ import (
 func (p *planner) validateCheckExpr(
 	ctx context.Context, exprStr string, tableName tree.TableExpr, tableDesc *sqlbase.TableDescriptor,
 ) error {
-	expr, err := parser.ParseExpr(exprStr)
+	expr, err := parser.ParseExpr(parser.ForEval(p.EvalContext()), exprStr)
 	if err != nil {
 		return err
 	}

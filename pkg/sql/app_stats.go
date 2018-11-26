@@ -259,7 +259,7 @@ func dumpStmtStats(ctx context.Context, appName string, stats map[stmtKey]*stmtS
 
 func scrubStmtStatKey(vt VirtualTabler, key string) (string, bool) {
 	// Re-parse the statement to obtain its AST.
-	stmt, err := parser.ParseOne(key)
+	stmt, err := parser.ParseOne(parser.Default(), key)
 	if err != nil {
 		return "", false
 	}

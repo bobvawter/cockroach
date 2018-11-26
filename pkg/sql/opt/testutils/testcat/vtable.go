@@ -38,7 +38,7 @@ func init() {
 	// Build a map that maps the names of the various information_schema tables
 	// to their CREATE TABLE AST.
 	for _, table := range informationSchemaTables {
-		parsed, err := parser.ParseOne(table)
+		parsed, err := parser.ParseOne(parser.Default(), table)
 		if err != nil {
 			panic(fmt.Sprintf("error initializing virtual table map: %s", err))
 		}

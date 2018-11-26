@@ -19,6 +19,9 @@ import (
 	"fmt"
 	"testing"
 
+	"github.com/cockroachdb/cockroach/pkg/sql/sem/tree"
+	"github.com/cockroachdb/cockroach/pkg/sql/sessiondata"
+	"github.com/cockroachdb/cockroach/pkg/sql/sqlbase/intsize"
 	"github.com/pkg/errors"
 
 	"github.com/cockroachdb/cockroach/pkg/base"
@@ -130,6 +133,7 @@ CREATE TABLE IF NOT EXISTS child_with_index(
 
 			fkTables, err := row.TablesNeededForFKs(
 				context.TODO(),
+				&tree.EvalContext{SessionData: &sessiondata.SessionData{DefaultIntSize: intsize.INT8}},
 				*pd,
 				row.CheckDeletes,
 				lookup,

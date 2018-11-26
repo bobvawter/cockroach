@@ -106,10 +106,10 @@ func getKeysForDatabaseDescriptor(
 // returning nil if the descriptor is not found. If you want the "not
 // found" condition to return an error, use mustGetDatabaseDescByID() instead.
 func getDatabaseDescByID(
-	ctx context.Context, txn *client.Txn, id sqlbase.ID,
+	ctx context.Context, evalCtx *tree.EvalContext, txn *client.Txn, id sqlbase.ID,
 ) (*sqlbase.DatabaseDescriptor, error) {
 	desc := &sqlbase.DatabaseDescriptor{}
-	if err := getDescriptorByID(ctx, txn, id, desc); err != nil {
+	if err := getDescriptorByID(ctx, evalCtx, txn, id, desc); err != nil {
 		return nil, err
 	}
 	return desc, nil
@@ -118,9 +118,9 @@ func getDatabaseDescByID(
 // MustGetDatabaseDescByID looks up the database descriptor given its ID,
 // returning an error if the descriptor is not found.
 func MustGetDatabaseDescByID(
-	ctx context.Context, txn *client.Txn, id sqlbase.ID,
+	ctx context.Context, evalCtx *tree.EvalContext, txn *client.Txn, id sqlbase.ID,
 ) (*sqlbase.DatabaseDescriptor, error) {
-	desc, err := getDatabaseDescByID(ctx, txn, id)
+	desc, err := getDatabaseDescByID(ctx, evalCtx, txn, id)
 	if err != nil {
 		return nil, err
 	}
@@ -189,6 +189,7 @@ func (dc *databaseCache) getCachedDatabaseDescByID(
 // if it exists in the cache, otherwise falls back to KV operations.
 func (dc *databaseCache) getDatabaseDesc(
 	ctx context.Context,
+	evalCtx *tree.EvalContext,
 	txnRunner func(context.Context, func(context.Context, *client.Txn) error) error,
 	name string,
 	required bool,
@@ -207,7 +208,7 @@ func (dc *databaseCache) getDatabaseDesc(
 	if desc == nil {
 		if err := txnRunner(ctx, func(ctx context.Context, txn *client.Txn) error {
 			a := UncachedPhysicalAccessor{}
-			desc, err = a.GetDatabaseDesc(ctx, txn, name,
+			desc, err = a.GetDatabaseDesc(ctx, evalCtx, txn, name,
 				DatabaseLookupFlags{required: required})
 			return err
 		}); err != nil {
@@ -220,12 +221,12 @@ func (dc *databaseCache) getDatabaseDesc(
 // getDatabaseDescByID returns the database descriptor given its ID
 // if it exists in the cache, otherwise falls back to KV operations.
 func (dc *databaseCache) getDatabaseDescByID(
-	ctx context.Context, txn *client.Txn, id sqlbase.ID,
+	ctx context.Context, evalCtx *tree.EvalContext, txn *client.Txn, id sqlbase.ID,
 ) (*sqlbase.DatabaseDescriptor, error) {
 	desc, err := dc.getCachedDatabaseDescByID(id)
 	if err != nil {
 		log.VEventf(ctx, 3, "error getting database descriptor from cache: %s", err)
-		desc, err = MustGetDatabaseDescByID(ctx, txn, id)
+		desc, err = MustGetDatabaseDescByID(ctx, evalCtx, txn, id)
 	}
 	return desc, err
 }
@@ -235,6 +236,7 @@ func (dc *databaseCache) getDatabaseDescByID(
 // operations.
 func (dc *databaseCache) getDatabaseID(
 	ctx context.Context,
+	evalCtx *tree.EvalContext,
 	txnRunner func(context.Context, func(context.Context, *client.Txn) error) error,
 	name string,
 	required bool,
@@ -243,7 +245,7 @@ func (dc *databaseCache) getDatabaseID(
 		return id, nil
 	}
 
-	desc, err := dc.getDatabaseDesc(ctx, txnRunner, name, required)
+	desc, err := dc.getDatabaseDesc(ctx, evalCtx, txnRunner, name, required)
 	if err != nil || desc == nil {
 		// desc can be nil if required == false and the database was not found.
 		return 0, err

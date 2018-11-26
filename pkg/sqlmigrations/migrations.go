@@ -218,7 +218,7 @@ type migrationDescriptor struct {
 	name string
 	// workFn must be idempotent so that we can safely re-run it if a node failed
 	// while running it.
-	workFn func(context.Context, runner) error
+	workFn func(context.Context, *tree.EvalContext, runner) error
 	// doesBackfill should be set to true if the migration triggers a backfill.
 	doesBackfill bool
 	// newDescriptorIDs is a function that returns the IDs of any additional
@@ -531,7 +531,7 @@ var SettingsDefaultOverrides = map[string]string{
 	"cluster.secret":                "<random>",
 }
 
-func optInToDiagnosticsStatReporting(ctx context.Context, r runner) error {
+func optInToDiagnosticsStatReporting(ctx context.Context, _ *tree.EvalContext, r runner) error {
 	// We're opting-out of the automatic opt-in. See discussion in updates.go.
 	if reportingOptOut {
 		return nil
@@ -540,19 +540,19 @@ func optInToDiagnosticsStatReporting(ctx context.Context, r runner) error {
 		ctx, r, "optInToDiagnosticsStatReporting", `SET CLUSTER SETTING diagnostics.reporting.enabled = true`)
 }
 
-func disableNetTrace(ctx context.Context, r runner) error {
+func disableNetTrace(ctx context.Context, _ *tree.EvalContext, r runner) error {
 	return runStmtAsRootWithRetry(
 		ctx, r, "disableNetTrace", `SET CLUSTER SETTING trace.debug.enable = false`)
 }
 
-func initializeClusterSecret(ctx context.Context, r runner) error {
+func initializeClusterSecret(ctx context.Context, _ *tree.EvalContext, r runner) error {
 	return runStmtAsRootWithRetry(
 		ctx, r, "initializeClusterSecret",
 		`SET CLUSTER SETTING cluster.secret = gen_random_uuid()::STRING`,
 	)
 }
 
-func populateVersionSetting(ctx context.Context, r runner) error {
+func populateVersionSetting(ctx context.Context, _ *tree.EvalContext, r runner) error {
 	var v roachpb.Version
 	if err := r.db.Txn(ctx, func(ctx context.Context, txn *client.Txn) error {
 		return txn.GetProto(ctx, keys.BootstrapVersionKey, &v)
@@ -595,7 +595,7 @@ func populateVersionSetting(ctx context.Context, r runner) error {
 	return nil
 }
 
-func addRootUser(ctx context.Context, r runner) error {
+func addRootUser(ctx context.Context, _ *tree.EvalContext, r runner) error {
 	// Upsert the root user into the table. We intentionally override any existing entry.
 	const upsertRootStmt = `
 	        UPSERT INTO system.users (username, "hashedPassword", "isRole") VALUES ($1, '', false)
@@ -603,7 +603,7 @@ func addRootUser(ctx context.Context, r runner) error {
 	return runStmtAsRootWithRetry(ctx, r, "addRootUser", upsertRootStmt, security.RootUser)
 }
 
-func addAdminRole(ctx context.Context, r runner) error {
+func addAdminRole(ctx context.Context, _ *tree.EvalContext, r runner) error {
 	// Upsert the admin role into the table. We intentionally override any existing entry.
 	const upsertAdminStmt = `
           UPSERT INTO system.users (username, "hashedPassword", "isRole") VALUES ($1, '', true)
@@ -611,7 +611,7 @@ func addAdminRole(ctx context.Context, r runner) error {
 	return runStmtAsRootWithRetry(ctx, r, "addAdminRole", upsertAdminStmt, sqlbase.AdminRole)
 }
 
-func addRootToAdminRole(ctx context.Context, r runner) error {
+func addRootToAdminRole(ctx context.Context, _ *tree.EvalContext, r runner) error {
 	// Upsert the role membership into the table. We intentionally override any existing entry.
 	const upsertAdminStmt = `
           UPSERT INTO system.role_members ("role", "member", "isAdmin") VALUES ($1, $2, true)
@@ -625,7 +625,7 @@ func addRootToAdminRole(ctx context.Context, r runner) error {
 // the allowed privileges.
 //
 // TODO(mberhault): Remove this migration in v2.1.
-func ensureMaxPrivileges(ctx context.Context, r runner) error {
+func ensureMaxPrivileges(ctx context.Context, _ *tree.EvalContext, r runner) error {
 	tableDescFn := func(desc *sqlbase.TableDescriptor) (bool, error) {
 		return desc.Privileges.MaybeFixPrivileges(desc.ID), nil
 	}
@@ -750,7 +750,7 @@ func upgradeDescsWithFn(
 	return nil
 }
 
-func disallowPublicUserOrRole(ctx context.Context, r runner) error {
+func disallowPublicUserOrRole(ctx context.Context, _ *tree.EvalContext, r runner) error {
 	// Check whether a user or role named "public" exists.
 	const selectPublicStmt = `
           SELECT username, "isRole" from system.users WHERE username = $1
@@ -785,7 +785,7 @@ func disallowPublicUserOrRole(ctx context.Context, r runner) error {
 	return nil
 }
 
-func createDefaultDbs(ctx context.Context, r runner) error {
+func createDefaultDbs(ctx context.Context, _ *tree.EvalContext, r runner) error {
 	// Create the default databases. These are plain databases with
 	// default permissions. Nothing special happens if they exist
 	// already.
@@ -808,7 +808,7 @@ func createDefaultDbs(ctx context.Context, r runner) error {
 	return err
 }
 
-func addJobsProgress(ctx context.Context, r runner) error {
+func addJobsProgress(ctx context.Context, evalCtx *tree.EvalContext, r runner) error {
 	// Ideally to add a column progress, we'd just run a query like:
 	//  ALTER TABLE system.jobs ADD COLUMN progress BYTES CREATE FAMLIY progress;
 	// However SQL-managed schema changes use jobs tracking internally, which will
@@ -835,7 +835,7 @@ func addJobsProgress(ctx context.Context, r runner) error {
 		if err := desc.AddColumnToFamilyMaybeCreate("progress", "progress", true, false); err != nil {
 			return err
 		}
-		if err := desc.AllocateIDs(); err != nil {
+		if err := desc.AllocateIDs(evalCtx); err != nil {
 			return err
 		}
 		return txn.Put(ctx, sqlbase.MakeDescMetadataKey(desc.ID), sqlbase.WrapDescriptor(desc))

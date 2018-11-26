@@ -57,7 +57,7 @@ func (p *planner) showTableDetails(
 
 // checkDBExists checks if the database exists by using the security.RootUser.
 func checkDBExists(ctx context.Context, p *planner, db string) error {
-	_, err := p.PhysicalSchemaAccessor().GetDatabaseDesc(ctx, p.txn, db,
+	_, err := p.PhysicalSchemaAccessor().GetDatabaseDesc(ctx, p.EvalContext(), p.txn, db,
 		p.CommonLookupFlags(true /*required*/))
 	return err
 }

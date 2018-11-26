@@ -406,6 +406,7 @@ func (sc *SchemaChanger) distBackfill(
 			if backfillType == columnBackfill {
 				fkTables, err := row.TablesNeededForFKs(
 					ctx,
+					&evalCtx.EvalContext,
 					*tableDesc,
 					row.CheckUpdates,
 					row.NoLookup,
@@ -597,6 +598,7 @@ func columnBackfillInTxn(
 	var otherTableDescs []sqlbase.TableDescriptor
 	fkTables, err := row.TablesNeededForFKs(
 		ctx,
+		evalCtx,
 		*tableDesc,
 		row.CheckUpdates,
 		row.NoLookup,

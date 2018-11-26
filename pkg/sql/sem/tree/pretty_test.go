@@ -71,7 +71,7 @@ func runTestPrettyData(t *testing.T, prefix string, cfg tree.PrettyCfg, matches 
 			if err != nil {
 				t.Fatal(err)
 			}
-			stmt, err := parser.ParseOne(string(sql))
+			stmt, err := parser.ParseOne(parser.Default(), string(sql))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -148,7 +148,7 @@ func TestPrettyVerify(t *testing.T) {
 		t.Run(orig, func(t *testing.T) {
 			sqlutils.VerifyStatementPrettyRoundtrip(t, orig)
 
-			stmt, err := parser.ParseOne(orig)
+			stmt, err := parser.ParseOne(parser.Default(), orig)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -172,7 +172,7 @@ func BenchmarkPrettyData(b *testing.B) {
 		if err != nil {
 			b.Fatal(err)
 		}
-		stmt, err := parser.ParseOne(string(sql))
+		stmt, err := parser.ParseOne(parser.Default(), string(sql))
 		if err != nil {
 			b.Fatal(err)
 		}

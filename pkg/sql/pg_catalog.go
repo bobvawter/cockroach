@@ -634,7 +634,7 @@ CREATE TABLE pg_catalog.pg_constraint (
 			table *sqlbase.TableDescriptor,
 			tableLookup tableLookupFn,
 		) error {
-			conInfo, err := table.GetConstraintInfoWithLookup(tableLookup.getTableByID)
+			conInfo, err := table.GetConstraintInfoWithLookup(p.EvalContext(), tableLookup.getTableByID)
 			if err != nil {
 				return err
 			}
@@ -896,7 +896,7 @@ CREATE TABLE pg_catalog.pg_depend (
 			table *sqlbase.TableDescriptor,
 			tableLookup tableLookupFn,
 		) error {
-			conInfo, err := table.GetConstraintInfoWithLookup(tableLookup.getTableByID)
+			conInfo, err := table.GetConstraintInfoWithLookup(p.EvalContext(), tableLookup.getTableByID)
 			if err != nil {
 				return err
 			}

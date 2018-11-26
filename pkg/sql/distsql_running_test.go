@@ -70,7 +70,7 @@ func TestDistSQLRunningInAbortedTxn(t *testing.T) {
 	)
 	defer cleanup()
 	p := internalPlanner.(*planner)
-	stmt, err := parser.ParseOne("select * from test.t")
+	stmt, err := parser.ParseOne(p.EvalContext().ParserCtx(), "select * from test.t")
 	if err != nil {
 		t.Fatal(err)
 	}

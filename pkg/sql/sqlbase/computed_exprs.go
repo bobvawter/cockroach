@@ -153,7 +153,7 @@ func MakeComputedExprs(
 			exprStrings = append(exprStrings, *col.ComputeExpr)
 		}
 	}
-	exprs, err := parser.ParseExprs(exprStrings)
+	exprs, err := parser.ParseExprs(parser.ForEval(evalCtx), exprStrings)
 	if err != nil {
 		return nil, err
 	}

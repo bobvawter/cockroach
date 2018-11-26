@@ -19,7 +19,6 @@ import (
 
 	"github.com/cockroachdb/cockroach/pkg/internal/client"
 	"github.com/cockroachdb/cockroach/pkg/keys"
-	"github.com/cockroachdb/cockroach/pkg/settings/cluster"
 	"github.com/cockroachdb/cockroach/pkg/sql/privilege"
 	"github.com/cockroachdb/cockroach/pkg/sql/sem/tree"
 	"github.com/cockroachdb/cockroach/pkg/sql/sqlbase"
@@ -83,8 +82,8 @@ func doCreateSequence(
 	// Inherit permissions from the database descriptor.
 	privs := dbDesc.GetPrivileges()
 
-	desc, err := MakeSequenceTableDesc(name.Table(), opts,
-		dbDesc.ID, id, params.p.txn.CommitTimestamp(), privs, params.EvalContext().Settings)
+	desc, err := MakeSequenceTableDesc(params.EvalContext(), name.Table(), opts,
+		dbDesc.ID, id, params.p.txn.CommitTimestamp(), privs)
 	if err != nil {
 		return err
 	}
@@ -105,7 +104,7 @@ func doCreateSequence(
 		return err
 	}
 
-	if err := desc.Validate(params.ctx, params.p.txn, params.extendedEvalCtx.Settings); err != nil {
+	if err := desc.Validate(params.ctx, params.EvalContext(), params.p.txn); err != nil {
 		return err
 	}
 
@@ -136,13 +135,13 @@ const (
 
 // MakeSequenceTableDesc creates a sequence descriptor.
 func MakeSequenceTableDesc(
+	evalCtx *tree.EvalContext,
 	sequenceName string,
 	sequenceOptions tree.SequenceOptions,
 	parentID sqlbase.ID,
 	id sqlbase.ID,
 	creationTime hlc.Timestamp,
 	privileges *sqlbase.PrivilegeDescriptor,
-	settings *cluster.Settings,
 ) (sqlbase.MutableTableDescriptor, error) {
 	desc := InitTableDescriptor(id, parentID, sequenceName, creationTime, privileges)
 
@@ -187,5 +186,5 @@ func MakeSequenceTableDesc(
 	// immediately.
 	desc.State = sqlbase.TableDescriptor_PUBLIC
 
-	return desc, desc.ValidateTable(settings)
+	return desc, desc.ValidateTable(evalCtx)
 }

@@ -55,19 +55,19 @@ func TestStmtBuf(t *testing.T) {
 	defer leaktest.AfterTest(t)()
 
 	ctx := context.TODO()
-	s1, err := parser.ParseOne("SELECT 1")
+	s1, err := parser.ParseOne(parser.Default(), "SELECT 1")
 	if err != nil {
 		t.Fatal(err)
 	}
-	s2, err := parser.ParseOne("SELECT 2")
+	s2, err := parser.ParseOne(parser.Default(), "SELECT 2")
 	if err != nil {
 		t.Fatal(err)
 	}
-	s3, err := parser.ParseOne("SELECT 3")
+	s3, err := parser.ParseOne(parser.Default(), "SELECT 3")
 	if err != nil {
 		t.Fatal(err)
 	}
-	s4, err := parser.ParseOne("SELECT 4")
+	s4, err := parser.ParseOne(parser.Default(), "SELECT 4")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -144,7 +144,7 @@ func TestStmtBufSignal(t *testing.T) {
 
 	ctx := context.TODO()
 	buf := NewStmtBuf()
-	s1, err := parser.ParseOne("SELECT 1")
+	s1, err := parser.ParseOne(parser.Default(), "SELECT 1")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -169,8 +169,7 @@ func TestStmtBufLtrim(t *testing.T) {
 	ctx := context.TODO()
 	buf := NewStmtBuf()
 	for i := 0; i < 5; i++ {
-		stmt, err := parser.ParseOne(
-			fmt.Sprintf("SELECT %d", i))
+		stmt, err := parser.ParseOne(parser.Default(), fmt.Sprintf("SELECT %d", i))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -196,7 +195,7 @@ func TestStmtBufClose(t *testing.T) {
 
 	ctx := context.TODO()
 	buf := NewStmtBuf()
-	stmt, err := parser.ParseOne("SELECT 1")
+	stmt, err := parser.ParseOne(parser.Default(), "SELECT 1")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -233,7 +232,7 @@ func TestStmtBufPreparedStmt(t *testing.T) {
 	buf := NewStmtBuf()
 	ctx := context.TODO()
 
-	s1, err := parser.ParseOne("SELECT 1")
+	s1, err := parser.ParseOne(parser.Default(), "SELECT 1")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -276,7 +275,7 @@ func TestStmtBufBatching(t *testing.T) {
 	buf := NewStmtBuf()
 	ctx := context.TODO()
 
-	s1, err := parser.ParseOne("SELECT 1")
+	s1, err := parser.ParseOne(parser.Default(), "SELECT 1")
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -36,7 +36,7 @@ import (
 
 func parseTableDesc(createTableStmt string) (*sqlbase.TableDescriptor, error) {
 	ctx := context.Background()
-	stmt, err := parser.ParseOne(createTableStmt)
+	stmt, err := parser.ParseOne(parser.Default(), createTableStmt)
 	if err != nil {
 		return nil, errors.Wrapf(err, `parsing %s`, createTableStmt)
 	}
@@ -59,7 +59,7 @@ func parseValues(tableDesc *sqlbase.TableDescriptor, values string) ([]sqlbase.E
 	semaCtx := &tree.SemaContext{}
 	evalCtx := &tree.EvalContext{}
 
-	valuesStmt, err := parser.ParseOne(values)
+	valuesStmt, err := parser.ParseOne(parser.Default(), values)
 	if err != nil {
 		return nil, err
 	}

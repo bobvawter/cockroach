@@ -26,7 +26,7 @@ import (
 func VerifyStatementPrettyRoundtrip(t *testing.T, sql string) {
 	t.Helper()
 
-	stmts, err := parser.Parse(sql)
+	stmts, err := parser.Parse(parser.Default(), sql)
 	if err != nil {
 		t.Fatalf("%s: %s", err, sql)
 	}
@@ -36,7 +36,7 @@ func VerifyStatementPrettyRoundtrip(t *testing.T, sql string) {
 	for _, origStmt := range stmts {
 		// Be careful to not simplify otherwise the tests won't round trip.
 		prettyStmt := cfg.Pretty(origStmt)
-		parsedPretty, err := parser.ParseOne(prettyStmt)
+		parsedPretty, err := parser.ParseOne(parser.Default(), prettyStmt)
 		if err != nil {
 			t.Fatalf("%s: %s", err, prettyStmt)
 		}
@@ -46,7 +46,7 @@ func VerifyStatementPrettyRoundtrip(t *testing.T, sql string) {
 			// Type annotations and unicode strings don't round trip well. Sometimes we
 			// need to reparse the original formatted output and format that for these
 			// to match.
-			reparsedStmt, err := parser.ParseOne(origFormatted)
+			reparsedStmt, err := parser.ParseOne(parser.Default(), origFormatted)
 			if err != nil {
 				t.Fatal(err)
 			}

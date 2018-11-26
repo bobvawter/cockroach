@@ -38,7 +38,7 @@ func TestResolveFunction(t *testing.T) {
 
 	searchPath := sessiondata.MakeSearchPath([]string{"pg_catalog"})
 	for _, tc := range testCases {
-		stmt, err := parser.ParseOne("SELECT " + tc.in + "(1)")
+		stmt, err := parser.ParseOne(parser.Default(), "SELECT "+tc.in+"(1)")
 		if err != nil {
 			t.Fatalf("%s: %v", tc.in, err)
 		}

@@ -115,7 +115,7 @@ func (t *partitioningTest) parse() error {
 
 	{
 		ctx := context.Background()
-		stmt, err := parser.ParseOne(t.parsed.createStmt)
+		stmt, err := parser.ParseOne(parser.Default(), t.parsed.createStmt)
 		if err != nil {
 			return errors.Wrapf(err, `parsing %s`, t.parsed.createStmt)
 		}

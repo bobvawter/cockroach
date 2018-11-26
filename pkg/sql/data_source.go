@@ -333,7 +333,7 @@ func (p *planner) getPlanForDesc(
 func (p *planner) getViewPlan(
 	ctx context.Context, tn *tree.TableName, desc *sqlbase.TableDescriptor,
 ) (planDataSource, error) {
-	stmt, err := parser.ParseOne(desc.ViewQuery)
+	stmt, err := parser.ParseOne(parser.ForEval(p.EvalContext()), desc.ViewQuery)
 	if err != nil {
 		return planDataSource{}, errors.Wrapf(err, "failed to parse underlying query from view %q", tn)
 	}

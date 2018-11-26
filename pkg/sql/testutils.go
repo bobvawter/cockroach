@@ -34,12 +34,12 @@ func CreateTestTableDescriptor(
 	privileges *sqlbase.PrivilegeDescriptor,
 ) (sqlbase.TableDescriptor, error) {
 	st := cluster.MakeTestingClusterSettings()
-	stmt, err := parser.ParseOne(schema)
+	evalCtx := tree.MakeTestingEvalContext(st)
+	stmt, err := parser.ParseOne(parser.ForEval(&evalCtx), schema)
 	if err != nil {
 		return sqlbase.TableDescriptor{}, err
 	}
 	semaCtx := tree.MakeSemaContext(false /* privileged */)
-	evalCtx := tree.MakeTestingEvalContext(st)
 	desc, err := MakeTableDesc(
 		ctx,
 		nil, /* txn */
@@ -97,11 +97,11 @@ func (r *StmtBufReader) SeekToNextBatch() error {
 func (dsp *DistSQLPlanner) Exec(
 	ctx context.Context, localPlanner interface{}, sql string, distribute bool,
 ) error {
-	stmt, err := parser.ParseOne(sql)
+	p := localPlanner.(*planner)
+	stmt, err := parser.ParseOne(parser.ForEval(p.EvalContext()), sql)
 	if err != nil {
 		return err
 	}
-	p := localPlanner.(*planner)
 	if err := p.makePlan(ctx, Statement{AST: stmt}); err != nil {
 		return err
 	}

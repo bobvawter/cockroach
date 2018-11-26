@@ -688,7 +688,7 @@ func (c *cascader) updateRows(
 			if err != nil {
 				return nil, nil, nil, 0, err
 			}
-			parsedExpr, err := parser.ParseExpr(*column.DefaultExpr)
+			parsedExpr, err := parser.ParseExpr(parser.ForEval(c.evalCtx), *column.DefaultExpr)
 			if err != nil {
 				return nil, nil, nil, 0, err
 			}

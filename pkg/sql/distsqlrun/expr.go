@@ -62,7 +62,7 @@ func processExpression(
 	if exprSpec.Expr == "" {
 		return nil, nil
 	}
-	expr, err := parser.ParseExpr(exprSpec.Expr)
+	expr, err := parser.ParseExpr(parser.ForEval(evalCtx), exprSpec.Expr)
 	if err != nil {
 		return nil, err
 	}

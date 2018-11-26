@@ -63,7 +63,7 @@ func TestMakeSimpleTableDescriptorErrors(t *testing.T) {
 	st := cluster.MakeTestingClusterSettings()
 	for _, tc := range tests {
 		t.Run(tc.stmt, func(t *testing.T) {
-			stmt, err := parser.ParseOne(tc.stmt)
+			stmt, err := parser.ParseOne(parser.Default(), tc.stmt)
 			if err != nil {
 				t.Fatal(err)
 			}

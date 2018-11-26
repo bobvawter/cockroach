@@ -113,7 +113,7 @@ func (n *renameTableNode) startExec(params runParams) error {
 	descKey := sqlbase.MakeDescMetadataKey(tableDesc.GetID())
 	newTbKey := tableKey{targetDbDesc.ID, newTn.Table()}.Key()
 
-	if err := tableDesc.Validate(ctx, p.txn, p.EvalContext().Settings); err != nil {
+	if err := tableDesc.Validate(ctx, p.EvalContext(), p.txn); err != nil {
 		return err
 	}
 

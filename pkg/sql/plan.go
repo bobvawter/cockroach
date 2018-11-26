@@ -688,7 +688,7 @@ func (p *planner) delegateQuery(
 	log.VEventf(ctx, 2, "delegated query: %q", sql)
 
 	// Prepare the sub-plan.
-	stmt, err := parser.ParseOne(sql)
+	stmt, err := parser.ParseOne(parser.ForEval(p.EvalContext()), sql)
 	if err != nil {
 		return nil, err
 	}

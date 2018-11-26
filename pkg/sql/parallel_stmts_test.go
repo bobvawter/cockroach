@@ -20,7 +20,6 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/cockroachdb/cockroach/pkg/sql/parser"
 	"github.com/pkg/errors"
 
 	"github.com/cockroachdb/cockroach/pkg/base"
@@ -326,7 +325,7 @@ func planQuery(t *testing.T, s serverutils.TestServerInterface, sql string) (*pl
 	// planner with the session so that its copy of the session data gets updated.
 	p.extendedEvalCtx.SessionData.Database = "test"
 
-	stmts, err := p.parser.Parse(parser.Default(), sql)
+	stmts, err := p.parser.Parse(p.EvalContext().ParserCtx(), sql)
 	if err != nil {
 		t.Fatal(err)
 	}

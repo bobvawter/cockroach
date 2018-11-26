@@ -462,7 +462,7 @@ func (ie *internalExecutorImpl) execInternal(
 
 	timeReceived := timeutil.Now()
 	parseStart := timeReceived
-	s, err := parser.ParseOne(stmt)
+	s, err := parser.ParseOne(parser.ForSession(ie.sessionData), stmt)
 	if err != nil {
 		return result{}, err
 	}

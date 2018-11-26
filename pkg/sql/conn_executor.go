@@ -360,6 +360,11 @@ type ConnectionHandler struct {
 	ex *connExecutor
 }
 
+// GetStatusParam retrieves the SessionData associated with the connection.
+func (h ConnectionHandler) GetSessionData() sessiondata.SessionData {
+	return h.ex.sessionData
+}
+
 // GetStatusParam retrieves the configured value of the session
 // variable identified by varName. This is used for the initial
 // message sent to a client during a session set-up.

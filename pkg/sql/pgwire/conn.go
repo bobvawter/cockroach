@@ -344,7 +344,7 @@ Loop:
 					break
 				}
 			}
-			if err = c.handleSimpleQuery(ctx, &c.readBuf, timeReceived); err != nil {
+			if err = c.handleSimpleQuery(ctx, &connHandler, &c.readBuf, timeReceived); err != nil {
 				break
 			}
 			err = c.stmtBuf.Push(ctx, sql.Sync{})
@@ -355,7 +355,7 @@ Loop:
 
 		case pgwirebase.ClientMsgParse:
 			doingExtendedQueryMessage = true
-			err = c.handleParse(ctx, &c.readBuf)
+			err = c.handleParse(ctx, &connHandler, &c.readBuf)
 
 		case pgwirebase.ClientMsgDescribe:
 			doingExtendedQueryMessage = true
@@ -433,7 +433,10 @@ Loop:
 // An error is returned iff the statement buffer has been closed. In that case,
 // the connection should be considered toast.
 func (c *conn) handleSimpleQuery(
-	ctx context.Context, buf *pgwirebase.ReadBuffer, timeReceived time.Time,
+	ctx context.Context,
+	handler *sql.ConnectionHandler,
+	buf *pgwirebase.ReadBuffer,
+	timeReceived time.Time,
 ) error {
 	query, err := buf.GetString()
 	if err != nil {
@@ -443,7 +446,7 @@ func (c *conn) handleSimpleQuery(
 	tracing.AnnotateTrace()
 
 	startParse := timeutil.Now()
-	stmts, err := parser.Parse(query)
+	stmts, err := parser.Parse(parser.IntSize(handler.GetSessionData().DefaultIntSize), query)
 	if err != nil {
 		return c.stmtBuf.Push(ctx, sql.SendError{Err: err})
 	}
@@ -501,7 +504,9 @@ func (c *conn) handleSimpleQuery(
 
 // An error is returned iff the statement buffer has been closed. In that case,
 // the connection should be considered toast.
-func (c *conn) handleParse(ctx context.Context, buf *pgwirebase.ReadBuffer) error {
+func (c *conn) handleParse(
+	ctx context.Context, handler *sql.ConnectionHandler, buf *pgwirebase.ReadBuffer,
+) error {
 	// protocolErr is set if a protocol error has to be sent to the client. A
 	// stanza at the bottom of the function pushes instructions for sending this
 	// error.
@@ -545,7 +550,7 @@ func (c *conn) handleParse(ctx context.Context, buf *pgwirebase.ReadBuffer) erro
 
 	startParse := timeutil.Now()
 	var stmt tree.Statement
-	stmts, err := parser.Parse(query)
+	stmts, err := parser.Parse(parser.IntSize(handler.GetSessionData().DefaultIntSize), query)
 	if len(stmts) > 1 {
 		err = pgerror.NewWrongNumberOfPreparedStatements(len(stmts))
 	} else if len(stmts) == 1 {

@@ -190,7 +190,11 @@ type dbCacheSubscriber interface {
 // return a nil descriptor and no error if the table does not exist.
 //
 func (tc *TableCollection) getMutableTableDescriptor(
-	ctx context.Context, txn *client.Txn, tn *tree.TableName, flags ObjectLookupFlags,
+	ctx context.Context,
+	evalCtx *tree.EvalContext,
+	txn *client.Txn,
+	tn *tree.TableName,
+	flags ObjectLookupFlags,
 ) (*sqlbase.MutableTableDescriptor, *sqlbase.DatabaseDescriptor, error) {
 	if log.V(2) {
 		log.Infof(ctx, "reading mutable descriptor on table '%s'", tn)
@@ -211,7 +215,7 @@ func (tc *TableCollection) getMutableTableDescriptor(
 	if dbID == 0 {
 		// Resolve the database from the database cache when the transaction
 		// hasn't modified the database.
-		dbID, err = tc.databaseCache.getDatabaseID(ctx,
+		dbID, err = tc.databaseCache.getDatabaseID(ctx, evalCtx,
 			tc.leaseMgr.execCfg.DB.Txn, tn.Catalog(), flags.required)
 		if err != nil || dbID == 0 {
 			// dbID can still be 0 if required is false and the database is not found.
@@ -227,7 +231,7 @@ func (tc *TableCollection) getMutableTableDescriptor(
 	}
 
 	phyAccessor := UncachedPhysicalAccessor{}
-	obj, db, err := phyAccessor.GetObjectDesc(ctx, txn, tn, flags)
+	obj, db, err := phyAccessor.GetObjectDesc(ctx, evalCtx, txn, tn, flags)
 	if obj == nil {
 		return nil, db, err
 	}
@@ -246,7 +250,11 @@ func (tc *TableCollection) getMutableTableDescriptor(
 // the validity window of the table descriptor version returned.
 //
 func (tc *TableCollection) getTableVersion(
-	ctx context.Context, txn *client.Txn, tn *tree.TableName, flags ObjectLookupFlags,
+	ctx context.Context,
+	evalCtx *tree.EvalContext,
+	txn *client.Txn,
+	tn *tree.TableName,
+	flags ObjectLookupFlags,
 ) (*sqlbase.TableDescriptor, *sqlbase.DatabaseDescriptor, error) {
 	if log.V(2) {
 		log.Infof(ctx, "planner acquiring lease on table '%s'", tn)
@@ -267,7 +275,7 @@ func (tc *TableCollection) getTableVersion(
 	if dbID == 0 {
 		// Resolve the database from the database cache when the transaction
 		// hasn't modified the database.
-		dbID, err = tc.databaseCache.getDatabaseID(ctx,
+		dbID, err = tc.databaseCache.getDatabaseID(ctx, evalCtx,
 			tc.leaseMgr.execCfg.DB.Txn, tn.Catalog(), flags.required)
 		if err != nil || dbID == 0 {
 			// dbID can still be 0 if required is false and the database is not found.
@@ -303,7 +311,7 @@ func (tc *TableCollection) getTableVersion(
 
 	readTableFromStore := func() (*sqlbase.TableDescriptor, *sqlbase.DatabaseDescriptor, error) {
 		phyAccessor := UncachedPhysicalAccessor{}
-		obj, db, err := phyAccessor.GetObjectDesc(ctx, txn, tn, flags)
+		obj, db, err := phyAccessor.GetObjectDesc(ctx, evalCtx, txn, tn, flags)
 		if obj == nil {
 			return nil, db, err
 		}
@@ -882,7 +890,7 @@ func (p *planner) writeTableDescToBatch(
 		p.queueSchemaChange(tableDesc.TableDesc(), mutationID)
 	}
 
-	if err := tableDesc.ValidateTable(p.extendedEvalCtx.Settings); err != nil {
+	if err := tableDesc.ValidateTable(p.EvalContext()); err != nil {
 		return pgerror.NewAssertionErrorf("table descriptor is not valid: %s\n%v", err, tableDesc)
 	}
 

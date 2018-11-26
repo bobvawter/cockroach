@@ -17,6 +17,7 @@ package sql
 import (
 	"context"
 
+	"github.com/cockroachdb/cockroach/pkg/sql/sem/tree"
 	"github.com/pkg/errors"
 
 	"github.com/cockroachdb/cockroach/pkg/internal/client"
@@ -125,7 +126,7 @@ func (p *planner) createDescriptorWithID(
 
 	mutDesc, isTable := descriptor.(*sqlbase.MutableTableDescriptor)
 	if isTable {
-		if err := mutDesc.ValidateTable(st); err != nil {
+		if err := mutDesc.ValidateTable(p.EvalContext()); err != nil {
 			return err
 		}
 		p.Tables().addUncommittedTable(*mutDesc)
@@ -148,6 +149,7 @@ func (p *planner) createDescriptorWithID(
 // `getTableDesc`.
 func getDescriptor(
 	ctx context.Context,
+	evalCtx *tree.EvalContext,
 	txn *client.Txn,
 	plainKey sqlbase.DescriptorKey,
 	descriptor sqlbase.DescriptorProto,
@@ -162,7 +164,7 @@ func getDescriptor(
 		return false, nil
 	}
 
-	if err := getDescriptorByID(ctx, txn, sqlbase.ID(gr.ValueInt()), descriptor); err != nil {
+	if err := getDescriptorByID(ctx, evalCtx, txn, sqlbase.ID(gr.ValueInt()), descriptor); err != nil {
 		return false, err
 	}
 	return true, nil
@@ -174,7 +176,11 @@ func getDescriptor(
 // In most cases you'll want to use wrappers: `getDatabaseDescByID` or
 // `getTableDescByID`.
 func getDescriptorByID(
-	ctx context.Context, txn *client.Txn, id sqlbase.ID, descriptor sqlbase.DescriptorProto,
+	ctx context.Context,
+	evalCtx *tree.EvalContext,
+	txn *client.Txn,
+	id sqlbase.ID,
+	descriptor sqlbase.DescriptorProto,
 ) error {
 	log.Eventf(ctx, "fetching descriptor with ID %d", id)
 	descKey := sqlbase.MakeDescMetadataKey(id)
@@ -191,7 +197,7 @@ func getDescriptorByID(
 		}
 		table.MaybeFillInDescriptor()
 
-		if err := table.Validate(ctx, txn, nil /* clusterVersion */); err != nil {
+		if err := table.Validate(ctx, evalCtx, txn); err != nil {
 			return err
 		}
 		*t = *table

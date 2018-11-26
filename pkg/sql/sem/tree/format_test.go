@@ -103,7 +103,7 @@ func TestFormatStatement(t *testing.T) {
 
 	for i, test := range testData {
 		t.Run(fmt.Sprintf("%d %s", i, test.stmt), func(t *testing.T) {
-			stmt, err := parser.ParseOne(test.stmt)
+			stmt, err := parser.ParseOne(parser.Default(), test.stmt)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -151,7 +151,7 @@ func TestFormatTableName(t *testing.T) {
 
 	for i, test := range testData {
 		t.Run(fmt.Sprintf("%d %s", i, test.stmt), func(t *testing.T) {
-			stmt, err := parser.ParseOne(test.stmt)
+			stmt, err := parser.ParseOne(parser.Default(), test.stmt)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -263,7 +263,7 @@ func TestFormatExpr(t *testing.T) {
 
 	for i, test := range testData {
 		t.Run(fmt.Sprintf("%d %s", i, test.expr), func(t *testing.T) {
-			expr, err := parser.ParseExpr(test.expr)
+			expr, err := parser.ParseExpr(parser.Default(), test.expr)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -383,7 +383,7 @@ func TestFormatPgwireText(t *testing.T) {
 	var evalCtx tree.EvalContext
 	for i, test := range testData {
 		t.Run(fmt.Sprintf("%d %s", i, test.expr), func(t *testing.T) {
-			expr, err := parser.ParseExpr(test.expr)
+			expr, err := parser.ParseExpr(parser.Default(), test.expr)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -420,7 +420,7 @@ func BenchmarkFormatRandomStatements(b *testing.B) {
 	stmts := make(tree.StatementList, 1000)
 	for i := 0; i < 1000; {
 		rdm := r.Generate("stmt", 20)
-		stmt, err := parser.ParseOne(rdm)
+		stmt, err := parser.ParseOne(parser.Default(), rdm)
 		if err != nil {
 			// Some statements (e.g. those containing error terminals) do
 			// not parse.  It's all right. Just ignore this and continue
@@ -436,7 +436,7 @@ func BenchmarkFormatRandomStatements(b *testing.B) {
 	b.Run("parse", func(b *testing.B) {
 		for i := 0; i < b.N; i++ {
 			for _, sql := range strs {
-				_, err := parser.ParseOne(sql)
+				_, err := parser.ParseOne(parser.Default(), sql)
 				if err != nil {
 					b.Fatal(err)
 				}

@@ -172,7 +172,7 @@ func (tc *Catalog) AddView(view *View) {
 // ExecuteDDL parses the given DDL SQL statement and creates objects in the test
 // catalog. This is used to test without spinning up a cluster.
 func (tc *Catalog) ExecuteDDL(sql string) (string, error) {
-	stmt, err := parser.ParseOne(sql)
+	stmt, err := parser.ParseOne(parser.Default(), sql)
 	if err != nil {
 		return "", err
 	}

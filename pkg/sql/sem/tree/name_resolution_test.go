@@ -123,7 +123,7 @@ func TestClassifyTablePattern(t *testing.T) {
 	for _, tc := range testCases {
 		t.Run(tc.in, func(t *testing.T) {
 			tp, err := func() (tree.TablePattern, error) {
-				stmt, err := parser.ParseOne(fmt.Sprintf("GRANT SELECT ON %s TO foo", tc.in))
+				stmt, err := parser.ParseOne(parser.Default(), fmt.Sprintf("GRANT SELECT ON %s TO foo", tc.in))
 				if err != nil {
 					return nil, err
 				}

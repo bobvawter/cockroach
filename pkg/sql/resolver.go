@@ -63,8 +63,8 @@ func (p *planner) ResolveUncachedDatabaseByName(
 	ctx context.Context, dbName string, required bool,
 ) (res *UncachedDatabaseDescriptor, err error) {
 	p.runWithOptions(resolveFlags{skipCache: true}, func() {
-		res, err = p.LogicalSchemaAccessor().GetDatabaseDesc(ctx, p.txn, dbName,
-			p.CommonLookupFlags(required))
+		res, err = p.LogicalSchemaAccessor().GetDatabaseDesc(ctx, p.EvalContext(),
+			p.txn, dbName, p.CommonLookupFlags(required))
 	})
 	return res, err
 }
@@ -72,13 +72,14 @@ func (p *planner) ResolveUncachedDatabaseByName(
 // GetObjectNames retrieves the names of all objects in the target database/schema.
 func GetObjectNames(
 	ctx context.Context,
+	evalCtx *tree.EvalContext,
 	txn *client.Txn,
 	sc SchemaResolver,
 	dbDesc *DatabaseDescriptor,
 	scName string,
 	explicitPrefix bool,
 ) (res TableNames, err error) {
-	return sc.LogicalSchemaAccessor().GetObjectNames(ctx, txn, dbDesc, scName,
+	return sc.LogicalSchemaAccessor().GetObjectNames(ctx, evalCtx, txn, dbDesc, scName,
 		DatabaseListFlags{
 			CommonLookupFlags: sc.CommonLookupFlags(true /*required*/),
 			explicitPrefix:    explicitPrefix,
@@ -258,11 +259,11 @@ func (p *planner) LookupSchema(
 	ctx context.Context, dbName, scName string,
 ) (found bool, scMeta tree.SchemaMeta, err error) {
 	sc := p.LogicalSchemaAccessor()
-	dbDesc, err := sc.GetDatabaseDesc(ctx, p.txn, dbName, p.CommonLookupFlags(false /*required*/))
+	dbDesc, err := sc.GetDatabaseDesc(ctx, p.EvalContext(), p.txn, dbName, p.CommonLookupFlags(false /*required*/))
 	if err != nil || dbDesc == nil {
 		return false, nil, err
 	}
-	return sc.IsValidSchema(dbDesc, scName), dbDesc, nil
+	return sc.IsValidSchema(p.EvalContext(), dbDesc, scName), dbDesc, nil
 }
 
 // LookupObject implements the tree.TableNameExistingResolver interface.
@@ -271,7 +272,8 @@ func (p *planner) LookupObject(
 ) (found bool, objMeta tree.NameResolutionResult, err error) {
 	sc := p.LogicalSchemaAccessor()
 	p.tableName = tree.MakeTableNameWithSchema(tree.Name(dbName), tree.Name(scName), tree.Name(tbName))
-	objDesc, _, err := sc.GetObjectDesc(ctx, p.txn, &p.tableName, p.ObjectLookupFlags(false /*required*/, requireMutable))
+	objDesc, _, err := sc.GetObjectDesc(ctx, p.EvalContext(), p.txn,
+		&p.tableName, p.ObjectLookupFlags(false /*required*/, requireMutable))
 	return objDesc != nil, objDesc, err
 }
 
@@ -320,7 +322,7 @@ func getDescriptorsFromTargetList(
 		if err != nil {
 			return nil, err
 		}
-		tableNames, err := expandTableGlob(ctx, p.txn, p, tableGlob)
+		tableNames, err := expandTableGlob(ctx, p.EvalContext(), p.txn, p, tableGlob)
 		if err != nil {
 			return nil, err
 		}
@@ -362,6 +364,7 @@ func (p *planner) getQualifiedTableName(
 // returned will be nil.
 func findTableContainingIndex(
 	ctx context.Context,
+	evalCtx *tree.EvalContext,
 	txn *client.Txn,
 	sc SchemaResolver,
 	dbName, scName string,
@@ -369,12 +372,12 @@ func findTableContainingIndex(
 	lookupFlags CommonLookupFlags,
 ) (result *tree.TableName, desc *MutableTableDescriptor, err error) {
 	sa := sc.LogicalSchemaAccessor()
-	dbDesc, err := sa.GetDatabaseDesc(ctx, txn, dbName, lookupFlags)
+	dbDesc, err := sa.GetDatabaseDesc(ctx, evalCtx, txn, dbName, lookupFlags)
 	if dbDesc == nil || err != nil {
 		return nil, nil, err
 	}
 
-	tns, err := sa.GetObjectNames(ctx, txn, dbDesc, scName,
+	tns, err := sa.GetObjectNames(ctx, evalCtx, txn, dbDesc, scName,
 		DatabaseListFlags{CommonLookupFlags: lookupFlags, explicitPrefix: true})
 	if err != nil {
 		return nil, nil, err
@@ -425,13 +428,14 @@ func expandMutableIndexName(
 	ctx context.Context, p *planner, index *tree.TableNameWithIndex, requireTable bool,
 ) (tn *tree.TableName, desc *MutableTableDescriptor, err error) {
 	p.runWithOptions(resolveFlags{skipCache: true}, func() {
-		tn, desc, err = expandIndexName(ctx, p.txn, p, index, requireTable)
+		tn, desc, err = expandIndexName(ctx, p.EvalContext(), p.txn, p, index, requireTable)
 	})
 	return tn, desc, err
 }
 
 func expandIndexName(
 	ctx context.Context,
+	evalCtx *tree.EvalContext,
 	txn *client.Txn,
 	sc SchemaResolver,
 	index *tree.TableNameWithIndex,
@@ -476,7 +480,8 @@ func expandIndexName(
 
 		lookupFlags := sc.CommonLookupFlags(requireTable)
 		var foundTn *tree.TableName
-		foundTn, desc, err = findTableContainingIndex(ctx, txn, sc, tn.Catalog(), tn.Schema(), index.Index, lookupFlags)
+		foundTn, desc, err = findTableContainingIndex(ctx, evalCtx, txn, sc,
+			tn.Catalog(), tn.Schema(), index.Index, lookupFlags)
 		if err != nil {
 			return nil, nil, err
 		} else if foundTn != nil {
@@ -538,7 +543,11 @@ func (p *planner) getTableAndIndex(
 // expandTableGlob expands pattern into a list of tables represented
 // as a tree.TableNames.
 func expandTableGlob(
-	ctx context.Context, txn *client.Txn, sc SchemaResolver, pattern tree.TablePattern,
+	ctx context.Context,
+	evalCtx *tree.EvalContext,
+	txn *client.Txn,
+	sc SchemaResolver,
+	pattern tree.TablePattern,
 ) (tree.TableNames, error) {
 	if t, ok := pattern.(*tree.TableName); ok {
 		_, err := ResolveExistingObject(ctx, sc, t, true /*required*/, anyDescType)
@@ -558,7 +567,8 @@ func expandTableGlob(
 		return nil, sqlbase.NewInvalidWildcardError(tree.ErrString(glob))
 	}
 
-	return GetObjectNames(ctx, txn, sc, descI.(*DatabaseDescriptor), glob.Schema(), glob.ExplicitSchema)
+	return GetObjectNames(ctx, evalCtx, txn, sc, descI.(*DatabaseDescriptor),
+		glob.Schema(), glob.ExplicitSchema)
 }
 
 // fkSelfResolver is a SchemaResolver that inserts itself between a

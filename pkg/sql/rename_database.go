@@ -81,7 +81,7 @@ func (n *renameDatabaseNode) startExec(params runParams) error {
 	// DDL statements bypass the cache.
 	lookupFlags.avoidCached = true
 	tbNames, err := phyAccessor.GetObjectNames(
-		ctx, p.txn, dbDesc, tree.PublicSchema, DatabaseListFlags{
+		ctx, p.EvalContext(), p.txn, dbDesc, tree.PublicSchema, DatabaseListFlags{
 			CommonLookupFlags: lookupFlags,
 			explicitPrefix:    true,
 		})
@@ -90,7 +90,7 @@ func (n *renameDatabaseNode) startExec(params runParams) error {
 	}
 	lookupFlags.required = false
 	for i := range tbNames {
-		objDesc, _, err := phyAccessor.GetObjectDesc(ctx, p.txn, &tbNames[i],
+		objDesc, _, err := phyAccessor.GetObjectDesc(ctx, p.EvalContext(), p.txn, &tbNames[i],
 			ObjectLookupFlags{CommonLookupFlags: lookupFlags})
 		if err != nil {
 			return err

@@ -173,7 +173,7 @@ func (n *createViewNode) startExec(params runParams) error {
 		}
 	}
 
-	if err := desc.Validate(params.ctx, params.p.txn, params.EvalContext().Settings); err != nil {
+	if err := desc.Validate(params.ctx, params.EvalContext(), params.p.txn); err != nil {
 		return err
 	}
 
@@ -238,7 +238,7 @@ func (n *createViewNode) makeViewTableDesc(
 	// happens to work in gc, but does not work in gccgo.
 	//
 	// See https://github.com/golang/go/issues/23188.
-	err := desc.AllocateIDs()
+	err := desc.AllocateIDs(params.EvalContext())
 	return desc, err
 }
 
@@ -278,6 +278,6 @@ func MakeViewTableDesc(
 	// happens to work in gc, but does not work in gccgo.
 	//
 	// See https://github.com/golang/go/issues/23188.
-	err := desc.AllocateIDs()
+	err := desc.AllocateIDs(evalCtx)
 	return desc, err
 }

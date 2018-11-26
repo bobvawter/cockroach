@@ -102,7 +102,7 @@ func (js *JSONStatistic) GetHistogram(evalCtx *tree.EvalContext) (*HistogramData
 		return nil, nil
 	}
 	h := &HistogramData{}
-	colType, err := parser.ParseType(js.HistogramColumnType)
+	colType, err := parser.ParseType(parser.ForEval(evalCtx), js.HistogramColumnType)
 	if err != nil {
 		return nil, err
 	}

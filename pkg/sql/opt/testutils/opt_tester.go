@@ -780,7 +780,7 @@ func (ot *OptTester) ExploreTrace() (string, error) {
 }
 
 func (ot *OptTester) buildExpr(factory *norm.Factory) error {
-	stmt, err := parser.ParseOne(ot.sql)
+	stmt, err := parser.ParseOne(ot.evalCtx.ParserCtx(), ot.sql)
 	if err != nil {
 		return err
 	}

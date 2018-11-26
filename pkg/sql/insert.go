@@ -114,6 +114,7 @@ func (p *planner) Insert(
 	}
 	fkTables, err := row.TablesNeededForFKs(
 		ctx,
+		p.EvalContext(),
 		*desc,
 		fkCheckType,
 		p.LookupTableByID,

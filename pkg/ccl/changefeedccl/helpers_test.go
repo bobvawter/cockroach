@@ -406,7 +406,7 @@ func (f *tableFeedFactory) Feed(t testing.TB, create string, args ...interface{}
 		t.Fatal(err)
 	}
 
-	parsed, err := parser.ParseOne(create)
+	parsed, err := parser.ParseOne(parser.Default(), create)
 	if err != nil {
 		t.Fatal(err)
 	}
