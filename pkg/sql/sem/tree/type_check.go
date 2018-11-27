@@ -511,7 +511,20 @@ func (expr *IndirectionExpr) TypeCheck(ctx *SemaContext, desired types.T) (Typed
 
 // TypeCheck implements the Expr interface.
 func (expr *AnnotateTypeExpr) TypeCheck(ctx *SemaContext, desired types.T) (TypedExpr, error) {
-	annotType := expr.annotationType()
+	// Note: as long as CastTargetToDatumType() returns the same datum
+	// type for all INT variants, the switch below does not change the
+	// type checking rules.  However if CastTargetToDatumType() ever
+	// changes, this switch will kick in and become effective.
+	reqType := expr.Type
+	if reqType == coltypes.Int {
+		switch sessiondata.IntSize {
+		case 8:
+			reqType = coltypes.Int8
+		case 4:
+			reqType = coltypes.Int4
+		}
+	}
+	annotType := coltypes.CastTargetToDatumType(reqType)
 	subExpr, err := typeCheckAndRequire(ctx, expr.Expr, annotType,
 		fmt.Sprintf("type annotation for %v as %s, found", expr.Expr, annotType))
 	if err != nil {
@@ -2058,6 +2071,7 @@ func (v *placeholderAnnotationVisitor) VisitPre(expr Expr) (recurse bool, newExp
 	switch t := expr.(type) {
 	case *AnnotateTypeExpr:
 		if arg, ok := t.Expr.(*Placeholder); ok {
+			// TODO(knz/bob): this seems suspicious. Review and change as needed.
 			assertType := t.annotationType()
 			if state, ok := v.placeholders[arg.Name]; ok && state.sawAssertion {
 				if state.shouldAnnotate && !assertType.Equivalent(state.typ) {

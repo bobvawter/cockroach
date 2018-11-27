@@ -95,6 +95,8 @@ type SessionData struct {
 	ForceSavepointRestart bool
 }
 
+const IntSize = 8 // can be 0 or 4
+
 // DataConversionConfig contains the parameters that influence
 // the conversion between SQL data types and strings/byte arrays.
 type DataConversionConfig struct {

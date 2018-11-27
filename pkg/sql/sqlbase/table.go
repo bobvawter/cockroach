@@ -25,6 +25,7 @@ import (
 	"github.com/cockroachdb/cockroach/pkg/sql/pgwire/pgerror"
 	"github.com/cockroachdb/cockroach/pkg/sql/sem/tree"
 	"github.com/cockroachdb/cockroach/pkg/sql/sem/types"
+	"github.com/cockroachdb/cockroach/pkg/sql/sessiondata"
 )
 
 // SanitizeVarFreeExpr verifies that an expression is valid, has the correct
@@ -97,6 +98,16 @@ func MakeColumnDefDescs(
 			"SERIAL cannot be used in this context")
 	}
 
+	requestedType := d.Type
+	if requestedType == coltypes.Int {
+		switch sessiondata.IntSize {
+		case 8:
+			requestedType = coltypes.Int8
+		case 4:
+			requestedType = coltypes.Int4
+		}
+	}
+
 	if len(d.CheckExprs) > 0 {
 		// Should never happen since `HoistConstraints` moves these to table level
 		return nil, nil, nil, errors.New("unexpected column CHECK constraint")
@@ -112,13 +123,14 @@ func MakeColumnDefDescs(
 	}
 
 	// Set Type.SemanticType and Type.Locale.
-	colDatumType := coltypes.CastTargetToDatumType(d.Type)
+	colDatumType := coltypes.CastTargetToDatumType(requestedType)
+	// TODO(knz/bob): this is suspicious. Review and change as needed.
 	colTyp, err := DatumTypeToColumnType(colDatumType)
 	if err != nil {
 		return nil, nil, nil, err
 	}
 
-	col.Type, err = PopulateTypeAttrs(evalCtx, colTyp, d.Type)
+	col.Type, err = PopulateTypeAttrs(evalCtx, colTyp, requestedType)
 	if err != nil {
 		return nil, nil, nil, err
 	}

@@ -75,6 +75,7 @@ func (p *planner) processSerialInColumnDef(
 		//
 		// TODO(knz): change this to coltypes.Int8 when #28690 moves
 		// forward.
+		// TODO(knz/bob): review this and change as required.
 		newSpec.Type = coltypes.Int
 
 	case sessiondata.SerialUsesSQLSequences:
