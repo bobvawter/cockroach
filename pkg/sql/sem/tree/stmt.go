@@ -71,6 +71,10 @@ const (
 
 // Statement represents a statement.
 type Statement interface {
+	// DEMO: I've marked Statement as implemented the generated
+	// --union Ast type.  This isn't strictly required, but it does
+	// improve code readability.
+	Ast
 	fmt.Stringer
 	NodeFormatter
 	StatementType() StatementType

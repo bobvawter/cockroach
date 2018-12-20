@@ -123,3 +123,7 @@ ignored = [
 [[constraint]]
   name = "github.com/openzipkin/zipkin-go-opentracing"
   version = "=0.3.3"
+
+[[constraint]]
+  branch = "master"
+  name = "github.com/cockroachdb/walkabout"

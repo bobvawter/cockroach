@@ -369,6 +369,14 @@
 
 [[projects]]
   branch = "master"
+  digest = "1:e102fd823948af24533d9b7d84931ef317724623055a82dd3b5d6ffcb37addcf"
+  name = "github.com/cockroachdb/walkabout"
+  packages = ["engine"]
+  pruneopts = "UT"
+  revision = "f1501cfd0c441cd0db6b2316c6978f6f8a95846f"
+
+[[projects]]
+  branch = "master"
   digest = "1:4c4c33075b704791d6a7f09dfb55c66769e8a1dc6adf87026292d274fe8ad113"
   name = "github.com/codahale/hdrhistogram"
   packages = ["."]
@@ -1710,6 +1718,7 @@
     "github.com/cockroachdb/returncheck",
     "github.com/cockroachdb/stress",
     "github.com/cockroachdb/ttycolor",
+    "github.com/cockroachdb/walkabout/engine",
     "github.com/codahale/hdrhistogram",
     "github.com/docker/distribution/reference",
     "github.com/docker/docker/api/types",
