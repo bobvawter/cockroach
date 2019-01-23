@@ -51,7 +51,9 @@ func TestTightener(t *testing.T) {
 		{"returnsConcretePtr", []string{"Concrete"}},
 		{"returnsConcreteAsTarget", []string{"Concrete"}},
 		{"returnsConcretePtrAsTarget", []string{"Concrete"}},
-		{"phiSimple", []string{"Bar", "Foo"}},
+		{"phiSimple", []string{"Concrete", "Other"}},
+		{"callsIndirect", []string{"Target"}},
+		{"usesMultiple", []string{"Concrete"}},
 	}
 
 	for _, td := range testData {
@@ -63,7 +65,7 @@ func TestTightener(t *testing.T) {
 				return
 			}
 			asMap := make(map[string]types.Type)
-			for _, conc := range x.function(fn).concrete() {
+			for _, conc := range x.function(fn).at(0) {
 			conc:
 				for {
 					switch tConc := conc.(type) {
@@ -79,6 +81,7 @@ func TestTightener(t *testing.T) {
 				}
 			}
 
+			a.Len(asMap, len(td.expected))
 			for _, ex := range td.expected {
 				a.Contains(asMap, ex, "missing type")
 			}

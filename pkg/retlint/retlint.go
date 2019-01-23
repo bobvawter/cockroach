@@ -19,79 +19,213 @@ package retlint
 
 import (
 	"go/types"
+	"sort"
+	"strings"
 
 	"golang.org/x/tools/go/ssa"
 )
 
-type tightened struct {
-	cached []types.Type
-	calc   func() []types.Type
-	parent *tightener
+func dedup(ts []types.Type) []types.Type {
+	if len(ts) > 1 {
+		filtered := ts[:0]
+		seen := make(map[types.Type]bool, len(ts))
+		for _, t := range ts {
+			if !seen[t] {
+				seen[t] = true
+				filtered = append(filtered, t)
+			}
+		}
+
+		sort.Slice(filtered, func(i, j int) bool {
+			return strings.Compare(ts[i].String(), ts[j].String()) < 0
+		})
+		ts = filtered
+	}
+	return ts
 }
 
-func (t *tightened) concrete() []types.Type {
+// tightened represents a memoized, deferrable type-tightening
+// computation. We want to be able to defer these computations in order
+// to support call-graph cycles.
+type tightened interface {
+	at(index int) []types.Type
+	len() int
+}
+
+type tightenedScalar struct {
+	cached []types.Type
+	calc   func() []types.Type
+}
+
+func exactly(ts ...types.Type) tightened {
+	return &tightenedScalar{cached: dedup(ts)}
+}
+
+func (t *tightenedScalar) at(index int) []types.Type {
+	if index != 0 {
+		panic("invalid index for scalar")
+	}
 	if t.calc != nil {
-		t.cached = t.calc()
+		temp := t.calc
 		t.calc = nil
+		t.cached = temp()
 	}
 	return t.cached
 }
 
+func (*tightenedScalar) len() int {
+	return 1
+}
+
+// tightenedTuple represents a tuple of tightened types. This is used
+// for the return values of functions.
+type tightenedTuple struct {
+	values []tightened
+}
+
+func (t *tightenedTuple) at(index int) []types.Type {
+	target := t.values[index]
+	var temp []types.Type
+	for i := 0; i < target.len(); i++ {
+		temp = append(temp, target.at(i)...)
+	}
+	return dedup(temp)
+}
+
+func (t *tightenedTuple) len() int {
+	return len(t.values)
+}
+
+type tightenedMerge struct {
+	cached []*[]types.Type
+	values []tightened
+}
+
+func merge(ts ...tightened) tightened {
+	maxLen := 0
+	for _, t := range ts {
+		l := t.len()
+		if l > maxLen {
+			maxLen = l
+		}
+	}
+	return &tightenedMerge{
+		cached: make([]*[]types.Type, maxLen),
+		values: ts,
+	}
+}
+
+func (t *tightenedMerge) at(index int) []types.Type {
+	if cached := t.cached[index]; cached != nil {
+		return *cached
+	}
+	var ret []types.Type
+	t.cached[index] = &ret
+	for _, v := range t.values {
+		if index < v.len() {
+			ret = append(ret, v.at(index)...)
+		}
+	}
+	ret = dedup(ret)
+	return ret
+}
+
+func (t *tightenedMerge) len() int {
+	return len(t.cached)
+}
+
 type tightener struct {
-	funcData map[*ssa.Function]*tightened
+	funcData map[*ssa.Function]tightened
 	// target contains the interface that we'll perform type-tightening for.
 	target  *types.Interface
-	valData map[ssa.Value]*tightened
+	valData map[ssa.Value]tightened
 }
 
 func new() *tightener {
 	return &tightener{
-		funcData: make(map[*ssa.Function]*tightened),
-		valData:  make(map[ssa.Value]*tightened),
+		funcData: make(map[*ssa.Function]tightened),
+		valData:  make(map[ssa.Value]tightened),
 	}
 }
 
-func (t *tightener) function(fn *ssa.Function) *tightened {
+func (t *tightener) function(fn *ssa.Function) tightened {
 	if found, ok := t.funcData[fn]; ok {
 		return found
 	}
-	ret := &tightened{
-		calc: func() []types.Type {
-			used := make(map[types.Type]bool)
+	ret := &tightenedTuple{}
+	t.funcData[fn] = ret
 
-			// Look for all return instructions and then work backwards.
-			for _, block := range fn.Blocks {
-				for _, inst := range block.Instrs {
-					if retInst, ok := inst.(*ssa.Return); ok {
-						for _, retVal := range retInst.Results {
-							for _, retConcrete := range t.tighten(retVal).concrete() {
-								used[retConcrete] = true
-							}
-						}
-					}
+	matrix := make([][]tightened, fn.Signature.Results().Len())
+
+	// Look for all return instructions and then work backwards.
+	for _, block := range fn.Blocks {
+		for _, inst := range block.Instrs {
+			if retInst, ok := inst.(*ssa.Return); ok {
+				for i, retVal := range retInst.Results {
+					matrix[i] = append(matrix[i], t.tighten(retVal))
 				}
 			}
-
-			ret := make([]types.Type, 0, len(used))
-			for typ := range used {
-				ret = append(ret, typ)
-			}
-			return ret
-		},
+		}
 	}
-	t.funcData[fn] = ret
+
+	merged := make([]tightened, len(matrix))
+	for i := range merged {
+		merged[i] = merge(matrix[i]...)
+	}
+	ret.values = merged
 	return ret
 }
 
-func (t *tightener) tighten(val ssa.Value) *tightened {
-	return &tightened{
-		calc: func() []types.Type {
-			switch val := val.(type) {
-			//			case *ssa.Call:
-			default:
-				return []types.Type{val.Type()}
-			}
-		},
+func (t *tightener) tighten(val ssa.Value) tightened {
+	switch val := val.(type) {
+	case *ssa.Call:
+		// Function calls:
+
+		// If the function is known to be statically-dispatched,
+		// then we'll delegate to the tightened version of that function.
+		if callee := val.Call.StaticCallee(); callee != nil {
+			return t.function(callee)
+		}
+
+		// Otherwise, for a virtual-dispatch, the best thing that we can do
+		// is to use the signature. Conceivably, for an interface
+		// invocation, we could find all implementors of the interface and
+		// merge them together.
+		results := val.Call.Signature().Results()
+		temp := make([]tightened, results.Len())
+		for i := 0; i < results.Len(); i++ {
+			temp[i] = exactly(results.At(i).Type())
+		}
+		return merge(temp...)
+
+	case *ssa.Extract:
+		return t.tighten(val.Tuple).(*tightenedTuple).values[val.Index]
+
+	case *ssa.MakeInterface:
+		// Interfaces are replaced by the type being wrapped into an interface.
+		return t.tighten(val.X)
+
+	case *ssa.Phi:
+		// A Phi ("phony") value represents the convergence of multiple
+		// flows after a branch.  For example:
+		//   var a Foo
+		//   if condition {
+		//     a = someFunc()
+		//   } else {
+		//     a = otherFunc()
+		//   }
+		//   doSomethingWith(a)
+		//
+		// The SSA of the above might look something like:
+		//   Call(doSomethingWith, Phi(Call(someFunc), Call(otherFunc)))
+		ret := make([]tightened, 0, len(val.Edges))
+		for _, edge := range val.Edges {
+			ret = append(ret, t.tighten(edge))
+		}
+		return merge(ret...)
+
+	default:
+		return exactly(val.Type())
 	}
 	//	typ := val.Type()
 	//	if !types.AssertableTo(t.target, typ) {
@@ -121,20 +255,5 @@ func (t *tightener) tighten(val ssa.Value) *tightened {
 	//		actual := t.trace(tVal.Tuple).inheritsFrom[tVal.Index]
 	//		data.inheritsFrom = []*valueData{actual}
 	//	case *ssa.Phi:
-	//		// A Phi ("phony") value represents the convergence of multiple
-	//		// flows after a branch.  For example:
-	//		//   var a Foo
-	//		//   if condition {
-	//		//     a = someFunc()
-	//		//   } else {
-	//		//     a = otherFunc()
-	//		//   }
-	//		//   doSomethingWith(a)
-	//		//
-	//		// The SSA of the above might look something like:
-	//		//   Call(doSomethingWith, Phi(Call(someFunc), Call(otherFunc)))
-	//		for _, edge := range tVal.Edges {
-	//			data.inheritsFrom = append(data.inheritsFrom, t.trace(edge))
-	//		}
 	//	}
 }

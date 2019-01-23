@@ -14,6 +14,9 @@
 
 package testdata
 
+// This file contains test declarations which will be parsed by
+// the test suite.
+
 import "math/rand"
 
 type Target interface {
@@ -45,7 +48,7 @@ func returnsConcretePtrAsTarget() Target {
 }
 
 func phiSimple() Target {
-	switch rand.Int31n(5) {
+	switch rand.Int() {
 	case 0:
 		return returnsConcrete()
 	case 1:
@@ -55,8 +58,25 @@ func phiSimple() Target {
 	case 3:
 		return returnsConcretePtrAsTarget()
 	case 4:
+		return &Other{}
+	case 5:
 		return phiSimple()
 	default:
 		panic("unimplemented")
 	}
+}
+
+var indirectInvocation func() Target
+
+func callsIndirect() Target {
+	return indirectInvocation()
+}
+
+func returnsMultiple() (Target, Target) {
+	return &Concrete{}, &Other{}
+}
+
+func usesMultiple() Target {
+	a, _ := returnsMultiple()
+	return a
 }
