@@ -54,6 +54,8 @@ func TestTightener(t *testing.T) {
 		{"phiSimple", []string{"Concrete", "Other"}},
 		{"callsIndirect", []string{"Target"}},
 		{"usesMultiple", []string{"Concrete"}},
+		{"usesSanitizerConcrete", []string{"Concrete", "Other"}},
+		{"usesSanitizerInt", []string{"Concrete", "Other"}},
 	}
 
 	for _, td := range testData {

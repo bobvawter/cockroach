@@ -80,3 +80,18 @@ func usesMultiple() Target {
 	a, _ := returnsMultiple()
 	return a
 }
+
+func sanitizer(x interface{}) Target {
+	if tgt, ok := x.(*Concrete); ok {
+		return tgt
+	}
+	return &Other{}
+}
+
+func usesSanitizerConcrete() Target {
+	return sanitizer(&Concrete{})
+}
+
+func usesSanitizerInt() Target {
+	return sanitizer(1)
+}
