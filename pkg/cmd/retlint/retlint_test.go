@@ -1,7 +1,6 @@
 package main
 
 import (
-	"go/types"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -10,10 +9,15 @@ import (
 func TestLoad(t *testing.T) {
 	a := assert.New(t)
 	l := RetLint{
-		Dir:      "./testdata",
-		Packages: []string{"."},
+		AllowedNames: []string{
+			"testdata/GoodPtrError",
+			"testdata/GoodValError",
+		},
+		Dir:        "./testdata",
+		Packages:   []string{"."},
+		TargetName: "error",
 	}
-	l.target = types.Universe.Lookup("error").Type().(*types.Named)
+
 	a.NoError(l.Execute())
 
 	tcs := []struct {

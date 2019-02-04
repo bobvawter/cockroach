@@ -1,8 +1,10 @@
 package main
 
 import (
+	"fmt"
 	"go/token"
 	"go/types"
+	"path"
 
 	"golang.org/x/tools/go/packages"
 	"golang.org/x/tools/go/ssa"
@@ -28,7 +30,11 @@ type RetLint struct {
 	AllowedNames []string
 	Dir          string
 	Packages     []string
-	TargetName   string
+
+	// The name of the target interface. This can be an unqualified name
+	// like "error", which will be resolved against golang's "Universe"
+	// scope, or something like "github.com/myproject/mypkg/SomeType".
+	TargetName string
 
 	// The acceptable types which implement the target interface.
 	allowed map[*types.Named]bool
@@ -50,6 +56,22 @@ func (l *RetLint) Execute() error {
 	if err != nil {
 		return err
 	}
+
+	// Resolve the input types names.
+	if found, err := resolve(pkgs, l.TargetName); err == nil {
+		l.target = found
+	} else {
+		return err
+	}
+
+	for _, allowed := range l.AllowedNames {
+		if found, err := resolve(pkgs, allowed); err == nil {
+			l.allowed[found] = true
+		} else {
+			return err
+		}
+	}
+
 	_, sPkgs := ssautil.Packages(pkgs, ssa.LogSource|ssa.GlobalDebug)
 
 	for _, pkg := range sPkgs {
@@ -216,6 +238,33 @@ func (l *RetLint) stat(fn *ssa.Function) *funcStat {
 		l.work = append(l.work, ret)
 	}
 	return ret
+}
+
+// resolve looks up a named type from within the collection of packages
+func resolve(pkgs []*packages.Package, typeName string) (*types.Named, error) {
+	tgtPkg, tgtName := path.Split(typeName)
+	var tgtObject types.Object
+	if tgtPkg == "" {
+		tgtObject = types.Universe.Lookup(tgtName)
+	} else {
+		tgtPkg = tgtPkg[:len(tgtPkg)-1]
+		for _, pkg := range pkgs {
+			if pkg.Name == tgtPkg {
+				tgtObject = pkg.Types.Scope().Lookup(tgtName)
+				if tgtObject != nil {
+					break
+				}
+			}
+		}
+	}
+	if tgtObject == nil {
+		return nil, fmt.Errorf("unable to find type %q", typeName)
+	}
+	if tgt, ok := tgtObject.Type().(*types.Named); ok {
+		return tgt, nil
+	} else {
+		return nil, fmt.Errorf("%q was not a named type", tgtName)
+	}
 }
 
 var clean = &funcStat{state: stateClean}
