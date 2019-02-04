@@ -5,6 +5,7 @@ import (
 	"go/token"
 	"go/types"
 	"path"
+	"strings"
 
 	"golang.org/x/tools/go/packages"
 	"golang.org/x/tools/go/ssa"
@@ -72,13 +73,14 @@ func (l *RetLint) Execute() error {
 		}
 	}
 
-	_, sPkgs := ssautil.Packages(pkgs, ssa.LogSource|ssa.GlobalDebug)
+	_, sPkgs := ssautil.AllPackages(pkgs, ssa.LogSource|ssa.GlobalDebug)
 
+	// Bootstrap the work to perform.
 	for _, pkg := range sPkgs {
 		pkg.Build()
 		for _, m := range pkg.Members {
 			if fn, ok := m.(*ssa.Function); ok {
-				l.extract(fn)
+				l.stat(fn)
 			}
 		}
 	}
@@ -126,10 +128,11 @@ func (l *RetLint) decide(stat *funcStat, val ssa.Value) {
 			case stateAnalyzing:
 				next.dirties[stat] = true
 			case stateDirty:
-				l.markDirty(stat)
+				why := append([]ssa.Value{t}, next.why...)
+				l.markDirty(stat, why...)
 			}
 		} else {
-			l.markDirty(stat)
+			l.markDirty(stat, t)
 		}
 
 	case *ssa.Extract:
@@ -171,7 +174,7 @@ func (l *RetLint) decide(stat *funcStat, val ssa.Value) {
 				lookAt = typ.Elem()
 			case *types.Named:
 				if !l.allowed[typ] {
-					l.markDirty(stat)
+					l.markDirty(stat, t)
 				}
 				return
 			default:
@@ -183,6 +186,8 @@ func (l *RetLint) decide(stat *funcStat, val ssa.Value) {
 
 // In the first pass, we'll extract all functions in the package.
 func (l *RetLint) extract(fn *ssa.Function) {
+	// Build is idempotent.
+	fn.Package().Build()
 	// Determine if the function returns a value of the target type.
 	results := fn.Signature.Results()
 	if results == nil {
@@ -195,7 +200,6 @@ func (l *RetLint) extract(fn *ssa.Function) {
 		if named, ok := results.At(i).Type().(*types.Named); ok {
 			if named == l.target {
 				targetIndexes = append(targetIndexes, i)
-				break
 			}
 		}
 	}
@@ -219,37 +223,46 @@ func (l *RetLint) extract(fn *ssa.Function) {
 	stat.targetIndexes = targetIndexes
 }
 
-func (l *RetLint) markDirty(stat *funcStat) {
+func (l *RetLint) markDirty(stat *funcStat, why ...ssa.Value) {
+	// Try to choose a shorter explanation, if we can.
+	if stat.why == nil || len(why) < len(stat.why) {
+		stat.why = why
+	}
 	if stat.state == stateDirty {
 		return
 	}
 	stat.state = stateDirty
 
-	for other := range stat.dirties {
-		l.markDirty(other)
+	nextWhy := append(append(why, stat.why...))
+	for chained := range stat.dirties {
+		l.markDirty(chained, nextWhy...)
 	}
 }
 
 func (l *RetLint) stat(fn *ssa.Function) *funcStat {
 	ret := l.stats[fn]
 	if ret == nil {
-		ret = &funcStat{}
+		ret = &funcStat{
+			dirties: make(map[*funcStat]bool),
+			fn:      fn,
+		}
 		l.stats[fn] = ret
 		l.work = append(l.work, ret)
+		l.extract(fn)
 	}
 	return ret
 }
 
 // resolve looks up a named type from within the collection of packages
 func resolve(pkgs []*packages.Package, typeName string) (*types.Named, error) {
-	tgtPkg, tgtName := path.Split(typeName)
+	tgtPath, tgtName := path.Split(typeName)
 	var tgtObject types.Object
-	if tgtPkg == "" {
+	if tgtPath == "" {
 		tgtObject = types.Universe.Lookup(tgtName)
 	} else {
-		tgtPkg = tgtPkg[:len(tgtPkg)-1]
+		tgtPath = tgtPath[:len(tgtPath)-1]
 		for _, pkg := range pkgs {
-			if pkg.Name == tgtPkg {
+			if pkg.Name == tgtPath {
 				tgtObject = pkg.Types.Scope().Lookup(tgtName)
 				if tgtObject != nil {
 					break
@@ -271,7 +284,25 @@ var clean = &funcStat{state: stateClean}
 
 type funcStat struct {
 	dirties       map[*funcStat]bool
+	fn            *ssa.Function
 	returns       []*ssa.Return
 	state         state
 	targetIndexes []int
+	// why contains the shortest-dirty-path
+	why []ssa.Value
+}
+
+func (s *funcStat) stringify(fs *token.FileSet) string {
+	if s == clean {
+		return "<Clean>"
+	}
+	sb := &strings.Builder{}
+
+	pos := fs.Position(s.fn.Pos())
+	fmt.Fprintf(sb, "%s: %s", pos, s.fn.Name())
+	for _, reason := range s.why {
+		fmt.Fprintf(sb, "\n  %s: %s", fs.Position(reason.Pos()), reason.String())
+	}
+
+	return sb.String()
 }

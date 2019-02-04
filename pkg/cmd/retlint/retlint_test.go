@@ -21,11 +21,17 @@ func TestLoad(t *testing.T) {
 	a.NoError(l.Execute())
 
 	tcs := []struct {
-		name  string
-		state state
+		name      string
+		state     state
+		whyLength int
 	}{
-		{"DirectGood", stateClean},
-		{"PhiGood", stateClean},
+		{name: "DirectBad", state: stateDirty, whyLength: 2},
+		{name: "DirectGood", state: stateClean},
+		{name: "DirectTupleBad", state: stateDirty, whyLength: 2},
+		{name: "DirectTupleBadChain", state: stateDirty, whyLength: 3},
+		{name: "PhiBad", state: stateDirty, whyLength: 3},
+		{name: "PhiGood", state: stateClean},
+		{name: "ShortestWhyPath", state: stateDirty, whyLength: 1},
 	}
 
 	for _, tc := range tcs {
@@ -35,10 +41,11 @@ func TestLoad(t *testing.T) {
 			for fn, stat := range l.stats {
 				if fn.Name() == tc.name {
 					a.Equalf(tc.state, stat.state, "was %s", stat.state)
+					a.Equalf(tc.whyLength, len(stat.why), "unexpected why length: %v", stat.why)
 					return
 				}
 			}
-			a.Failf("did not find function named %q", tc.name)
+			a.Fail("did not find function", tc.name)
 		})
 	}
 }
