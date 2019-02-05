@@ -44,8 +44,9 @@ source of the undesirable type.
 
 ## Implementation
 
-The implementation can be structured as a tri-state, inductive,
-call-graph analysis.  All functions start in an `unknown` state.
+The implementation is structured as an inductive call-graph analysis.
+All functions start in an `unknown` state and are classified into
+`clean` and `dirty`.
 
 Functions are `clean` if all of the following properties apply to every
 [`Value`](https://godoc.org/golang.org/x/tools/go/ssa#Value) that

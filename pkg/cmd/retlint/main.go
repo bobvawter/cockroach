@@ -1,3 +1,17 @@
+// Copyright 2019 The Cockroach Authors.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or
+// implied. See the License for the specific language governing
+// permissions and limitations under the License.
+
 package main
 
 import (
@@ -39,6 +53,7 @@ type RetLint struct {
 
 	// The acceptable types which implement the target interface.
 	allowed map[*types.Named]bool
+	pgm     *ssa.Program
 	stats   map[*ssa.Function]*funcStat
 	// The interfaces that we trigger the behavior on.
 	target *types.Named
@@ -73,11 +88,12 @@ func (l *RetLint) Execute() error {
 		}
 	}
 
-	_, sPkgs := ssautil.AllPackages(pkgs, ssa.LogSource|ssa.GlobalDebug)
+	pgm, sPkgs := ssautil.AllPackages(pkgs, 0 /* Flags */)
+	l.pgm = pgm
+	pgm.Build()
 
 	// Bootstrap the work to perform.
 	for _, pkg := range sPkgs {
-		pkg.Build()
 		for _, m := range pkg.Members {
 			if fn, ok := m.(*ssa.Function); ok {
 				l.stat(fn)
@@ -85,6 +101,7 @@ func (l *RetLint) Execute() error {
 		}
 	}
 
+	// Loop until we haven't added any new functions.
 	for l.work != nil {
 		work := l.work
 		l.work = nil
@@ -93,6 +110,7 @@ func (l *RetLint) Execute() error {
 		}
 	}
 
+	// Any functions not dirty by now are clean.
 	for _, stat := range l.stats {
 		if stat.state == stateAnalyzing {
 			stat.state = stateClean
