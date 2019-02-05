@@ -16,13 +16,19 @@ package testdata
 
 import "errors"
 
+type Selfish interface {
+	Self() error
+}
+
 type BadError struct{}
 
 func (*BadError) Error() string { return "Bad" }
+func (e *BadError) Self() error { return e }
 
 type GoodPtrError struct{}
 
 func (*GoodPtrError) Error() string { return "Good" }
+func (e *GoodPtrError) Self() error { return e }
 
 type GoodValError struct{}
 
@@ -69,6 +75,42 @@ func EnsureGoodValWithCommaOk(err error) error {
 	return GoodValError{}
 }
 
+func ExplictReturnVarNoOp() (err error) {
+	return
+}
+
+func ExplicitReturnVarBad() (err error) {
+	err = DirectBad()
+	return
+}
+
+func ExplicitReturnVarGood() (err error) {
+	err = DirectGood()
+	return
+}
+
+func ExplicitReturnVarPhiBad() (err error) {
+	switch choose() {
+	case 0:
+		err = DirectBad()
+	case 1:
+		err = DirectGood()
+	}
+	return
+}
+
+func ExplicitReturnVarPhiGood() (err error) {
+	switch choose() {
+	case 0:
+		err = DirectGood()
+	case 1:
+		err = &GoodValError{}
+	case 2:
+		err = &GoodPtrError{}
+	}
+	return
+}
+
 func EnsureGoodValWithSwitch(err error) error {
 	switch t := err.(type) {
 	case GoodValError:
@@ -89,6 +131,12 @@ func EnsureGoodValWithTest(err error) error {
 
 func MakesIndirectCall(fn func() error) error {
 	return fn()
+}
+
+func NoopGood() {}
+
+func NoopCallGood() {
+	NoopGood()
 }
 
 func PhiBad() error {
@@ -133,6 +181,18 @@ func ShortestWhyPath() error {
 	default:
 		return PhiBad()
 	}
+}
+
+func ReturnNilGood() error {
+	return nil
+}
+
+func UsesSelfBad() error {
+	return (&BadError{}).Self()
+}
+
+func UsesSelfGood() error {
+	return (&GoodPtrError{}).Self()
 }
 
 func choose() int {

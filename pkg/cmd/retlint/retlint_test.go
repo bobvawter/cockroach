@@ -12,54 +12,79 @@
 // implied. See the License for the specific language governing
 // permissions and limitations under the License.
 
-package main
+package main_test
 
 import (
+	"path/filepath"
+	"sort"
 	"testing"
 
+	retlint "github.com/cockroachdb/cockroach/pkg/cmd/retlint"
 	"github.com/stretchr/testify/assert"
 )
 
-func TestLoad(t *testing.T) {
+func Test(t *testing.T) {
 	a := assert.New(t)
-	l := RetLint{
+	fakePkgName, err := filepath.Abs("./testdata")
+	if !a.NoError(err) {
+		return
+	}
+
+	l := retlint.RetLint{
 		AllowedNames: []string{
-			"testdata/GoodPtrError",
-			"testdata/GoodValError",
+			"_" + fakePkgName + "/GoodPtrError",
+			"_" + fakePkgName + "/GoodValError",
 		},
-		Dir:        "./testdata",
+		Dir:        fakePkgName,
 		Packages:   []string{"."},
 		TargetName: "error",
 	}
 
-	a.NoError(l.Execute())
+	dirty, err := l.Execute()
+	if !a.NoError(err) {
+		return
+	}
 
 	tcs := []struct {
 		name      string
-		state     state
 		whyLength int
 	}{
-		{name: "DirectBad", state: stateDirty, whyLength: 2},
-		{name: "DirectGood", state: stateClean},
-		{name: "DirectTupleBad", state: stateDirty, whyLength: 2},
-		{name: "DirectTupleBadChain", state: stateDirty, whyLength: 3},
-		{name: "EnsureGoodValWithCommaOk", state: stateClean},
-		{name: "EnsureGoodValWithSwitch", state: stateClean},
-		{name: "EnsureGoodValWithTest", state: stateClean},
-		{name: "MakesIndirectCall", state: stateDirty, whyLength: 1},
-		{name: "PhiBad", state: stateDirty, whyLength: 3},
-		{name: "PhiGood", state: stateClean},
-		{name: "ShortestWhyPath", state: stateDirty, whyLength: 1},
+		{name: "(*BadError).Self", whyLength: 1},
+		{name: "DirectBad", whyLength: 2},
+		{name: "DirectTupleBad", whyLength: 2},
+		{name: "DirectTupleBadCaller", whyLength: 3},
+		{name: "DirectTupleBadChain", whyLength: 3},
+		{name: "EnsureGoodValWithTest", whyLength: 1}, // XXX FIXME
+		{name: "ExplicitReturnVarBad", whyLength: 3},
+		{name: "ExplicitReturnVarPhiBad", whyLength: 3},
+		{name: "MakesIndirectCall", whyLength: 1},
+		{name: "PhiBad", whyLength: 3},
+		{name: "ShortestWhyPath", whyLength: 1},
+		{name: "UsesSelfBad", whyLength: 2},
 	}
+
+	t.Run("good extraction", func(t *testing.T) {
+		a := assert.New(t)
+		tcNames := make([]string, len(tcs))
+		for i, tc := range tcs {
+			tcNames[i] = tc.name
+		}
+		sort.Strings(tcNames)
+		dirtyNames := make([]string, len(dirty))
+		for i, d := range dirty {
+			dirtyNames[i] = d.Fn().RelString(d.Fn().Pkg.Pkg)
+		}
+		sort.Strings(dirtyNames)
+		a.Equal(tcNames, dirtyNames)
+	})
 
 	for _, tc := range tcs {
 		t.Run(tc.name, func(t *testing.T) {
 			a := assert.New(t)
 
-			for fn, stat := range l.stats {
-				if fn.Name() == tc.name {
-					a.Equalf(tc.state, stat.state, "was %s\n%s", stat.state, stat.stringify(l.pgm.Fset))
-					a.Equalf(tc.whyLength, len(stat.why), "unexpected why length: %v", stat.why)
+			for _, d := range dirty {
+				if d.Fn().RelString(d.Fn().Pkg.Pkg) == tc.name {
+					a.Equalf(tc.whyLength, len(d.Why()), "unexpected why length:\n%s", d)
 					return
 				}
 			}
