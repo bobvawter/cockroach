@@ -158,10 +158,13 @@ func (l *RetLint) Execute() ([]DirtyFunction, error) {
 	return ret, nil
 }
 
+// analyze begins the analysis process for a function.  This function
+// is a no-op if it has already been called on the stat.
 func (l *RetLint) analyze(stat *funcStat) {
 	if stat.state != stateUnknown {
 		return
 	}
+	//
 	defer func() {
 		x := recover()
 		if x == nil {

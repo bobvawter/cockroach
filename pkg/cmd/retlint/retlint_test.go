@@ -92,3 +92,26 @@ func Test(t *testing.T) {
 		})
 	}
 }
+
+func Benchmark(b *testing.B) {
+	fakePkgName, err := filepath.Abs("./testdata")
+	if err != nil {
+		b.Fatal(err)
+	}
+	for i := 0; i < b.N; i++ {
+
+		l := retlint.RetLint{
+			AllowedNames: []string{
+				"_" + fakePkgName + "/GoodPtrError",
+				"_" + fakePkgName + "/GoodValError",
+			},
+			Dir:        fakePkgName,
+			Packages:   []string{"."},
+			TargetName: "error",
+		}
+
+		if _, err := l.Execute(); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
