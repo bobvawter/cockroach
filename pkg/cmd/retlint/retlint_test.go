@@ -54,12 +54,12 @@ func Test(t *testing.T) {
 		{name: "DirectTupleBad", whyLength: 2},
 		{name: "DirectTupleBadCaller", whyLength: 3},
 		{name: "DirectTupleBadChain", whyLength: 3},
-		{name: "EnsureGoodValWithTest", whyLength: 1}, // XXX FIXME
 		{name: "ExplicitReturnVarBad", whyLength: 3},
 		{name: "ExplicitReturnVarPhiBad", whyLength: 3},
 		{name: "MakesIndirectCall", whyLength: 1},
 		{name: "PhiBad", whyLength: 3},
 		{name: "ShortestWhyPath", whyLength: 1},
+		{name: "TodoNoTypeInference", whyLength: 1}, // See doc on fn
 		{name: "UsesSelfBad", whyLength: 2},
 	}
 

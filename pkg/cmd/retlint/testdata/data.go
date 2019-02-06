@@ -122,13 +122,6 @@ func EnsureGoodValWithSwitch(err error) error {
 	}
 }
 
-func EnsureGoodValWithTest(err error) error {
-	if _, ok := err.(GoodValError); ok {
-		return err
-	}
-	return GoodValError{}
-}
-
 func MakesIndirectCall(fn func() error) error {
 	return fn()
 }
@@ -185,6 +178,16 @@ func ShortestWhyPath() error {
 
 func ReturnNilGood() error {
 	return nil
+}
+
+// Trying to run down this particular form, where we don't return the
+// value of the TypeAssert has proven to be excessively convoluted
+// to get right.
+func TodoNoTypeInference(err error) error {
+	if _, ok := err.(GoodValError); ok {
+		return err
+	}
+	return GoodValError{}
 }
 
 func UsesSelfBad() error {
