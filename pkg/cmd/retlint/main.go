@@ -35,9 +35,7 @@ func main() {
 			if len(dirty) == 0 {
 				return nil
 			}
-			for _, d := range dirty {
-				fmt.Println(d)
-			}
+			fmt.Println(l.Report(dirty))
 			if setExitStatus {
 				return errors.New("dirty")
 			}

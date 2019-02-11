@@ -20,6 +20,7 @@ import (
 	"go/token"
 	"go/types"
 	"path"
+	"strings"
 
 	"github.com/pkg/errors"
 	"golang.org/x/tools/go/packages"
@@ -156,6 +157,48 @@ func (l *RetLint) Execute() ([]DirtyFunction, error) {
 		}
 	}
 	return ret, nil
+}
+
+// Report produces a human-readable description of why the various
+// functions are dirty.
+func (l *RetLint) Report(dirty []DirtyFunction) string {
+	reported := make(map[*ssa.Function]bool)
+	sb := &strings.Builder{}
+
+	for _, stat := range dirty {
+		fn := stat.Fn()
+		if reported[fn] {
+			continue
+		}
+		reported[fn] = true
+
+		fset := fn.Prog.Fset
+		_, _ = fmt.Fprintf(sb, "%s: func %s",
+			fset.Position(fn.Pos()), fn.RelString(fn.Pkg.Pkg))
+
+		for _, reason := range stat.Why() {
+			_, _ = fmt.Fprintf(sb, "\n  %s: %s: %s",
+				fset.Position(reason.Value.Pos()),
+				reason.Reason,
+				reason.Value)
+
+			if call, ok := reason.Value.(*ssa.Call); ok {
+				if callee := call.Common().StaticCallee(); callee != nil {
+					// Short-circuit the report if we're calling a function
+					// which has already been reported.
+					if reported[callee] {
+						sb.WriteString(" (already reported)")
+						break
+					}
+					// Mark any reported-upon callee as already seen.
+					reported[callee] = true
+				}
+			}
+		}
+		sb.WriteString("\n")
+	}
+
+	return sb.String()
 }
 
 // analyze begins the analysis process for a function.  This function
