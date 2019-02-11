@@ -44,28 +44,38 @@ type DirtyReason struct {
 	Value  ssa.Value
 }
 
+// because constructs a new DirtyReason in a printf style.
 func because(value ssa.Value, reason string, args ...interface{}) []DirtyReason {
 	return []DirtyReason{{fmt.Sprintf(reason, args...), value}}
 }
 
+// RetLint analyses functions which return an interface type. It will
+// attempt to determine if all concrete values which implement the
+// interface are members of an "acceptable" set of types.
+//
+// The linter is configured with some number of type names. These can be
+// unqualified names like "error", which will be resolved against
+// golang's "Universe" scope, or something like
+// "github.com/myproject/mypkg/SomeType".
 type RetLint struct {
+	// The names of the allowed types.
 	AllowedNames []string
 	// Override the current working directory.
 	Dir string
 	// The names of the packages whose exported functions will be
 	Packages []string
-
-	// The name of the target interface. This can be an unqualified name
-	// like "error", which will be resolved against golang's "Universe"
-	// scope, or something like "github.com/myproject/mypkg/SomeType".
+	// The name of the target interface.
 	TargetName string
 
 	// The acceptable types which implement the target interface.
 	allowed map[*types.Named]bool
-	stats   map[*ssa.Function]*funcStat
+	// Accumulates information during the analysis.
+	stats map[*ssa.Function]*funcStat
 	// The interfaces that we trigger the behavior on.
 	target *types.Named
-	work   []*funcStat
+	// New funcStat instances are added to this slice and then processed
+	// in batches.
+	work []*funcStat
 }
 
 // Execute performs the analysis and returns the dirty functions which
@@ -89,7 +99,7 @@ func (l *RetLint) Execute() ([]DirtyFunction, error) {
 	pgm, sPkgs := ssautil.AllPackages(pkgs, 0 /* mode flags */)
 	pgm.Build()
 
-	// Resolve the input types names.
+	// Resolve the configured type names.
 	if found, err := resolve(pgm, l.TargetName); err == nil {
 		l.target = found
 	} else {
@@ -104,11 +114,14 @@ func (l *RetLint) Execute() ([]DirtyFunction, error) {
 		}
 	}
 
-	sPkgMap := make(map[*ssa.Package]bool)
+	// We want to create a set of the ssa.Packages that result from
+	// the user's package input pattern.  We'll use that below in order
+	// to filter the functions that we report on.
+	userConfiguredPackages := make(map[*ssa.Package]bool)
 
-	// Bootstrap the work to perform.
+	// Bootstrap the work to perform by looking at top-level declarations.
 	for _, pkg := range sPkgs {
-		sPkgMap[pkg] = true
+		userConfiguredPackages[pkg] = true
 		for _, m := range pkg.Members {
 			switch t := m.(type) {
 			case *ssa.Function:
@@ -152,7 +165,7 @@ func (l *RetLint) Execute() ([]DirtyFunction, error) {
 	// Returns dirty functions declared in the input package(s).
 	var ret []DirtyFunction
 	for _, s := range l.stats {
-		if s.state == stateDirty && ast.IsExported(s.fn.Name()) && sPkgMap[s.fn.Pkg] {
+		if s.state == stateDirty && ast.IsExported(s.fn.Name()) && userConfiguredPackages[s.fn.Pkg] {
 			ret = append(ret, s)
 		}
 	}
@@ -207,7 +220,8 @@ func (l *RetLint) analyze(stat *funcStat) {
 	if stat.state != stateUnknown {
 		return
 	}
-	//
+	// Improve error messages if the linter panics by recording the
+	// function being analyzed.
 	defer func() {
 		x := recover()
 		if x == nil {
@@ -238,30 +252,55 @@ func (l *RetLint) decide(stat *funcStat, val ssa.Value, seen map[ssa.Value]bool)
 		return
 	}
 	seen[val] = true
+
 	switch t := val.(type) {
 	case *ssa.Call:
+		// When we see a call, we must determine if all functions which
+		// could be invoked are clean.  In the simplest case of a
+		// statically-resolvable function call, there will be exactly
+		// one function.  For calls to an interface method, we'll look
+		// for all types which implement the interface and select the
+		// functions which implement the interface method.  Unless we were
+		// to perform a complete type-flow analysis, this check may be
+		// slightly too aggressive.
+		var callees []*ssa.Function
+
 		if callee := t.Call.StaticCallee(); callee != nil {
-			next := l.stat(callee)
-			l.analyze(next)
-			switch next.state {
-			case stateClean:
-			// Already proven to be clean, ignore.
-			case stateDirty:
-				// Already proven to be dirty, propagate reason.
-				why := make([]DirtyReason, len(next.why)+1)
-				why[0] = DirtyReason{"calls", t}
-				copy(why[1:], next.why)
-				l.markDirty(stat, why)
-			default:
-				// Mark for future dirtying.
-				next.dirties[stat] = t
+			callees = append(callees, callee)
+		} else if recv := t.Call.Signature().Recv(); recv != nil {
+			intf := recv.Type().Underlying().(*types.Interface)
+			for _, typ := range stat.fn.Prog.RuntimeTypes() {
+				if types.Implements(typ, intf) {
+					callee = stat.fn.Prog.LookupMethod(typ, t.Common().Method.Pkg(), t.Common().Method.Name())
+					callees = append(callees, callee)
+				}
 			}
-		} else {
+		}
+
+		if callees == nil {
 			l.markDirty(stat, because(t, "callee not static"))
+		} else {
+			for _, callee := range callees {
+				next := l.stat(callee)
+				l.analyze(next)
+				switch next.state {
+				case stateClean:
+				// Already proven to be clean, ignore.
+				case stateDirty:
+					// Already proven to be dirty, propagate reason.
+					why := make([]DirtyReason, len(next.why)+1)
+					why[0] = DirtyReason{"calls", t}
+					copy(why[1:], next.why)
+					l.markDirty(stat, why)
+				default:
+					// Mark for future dirtying.
+					next.dirties[stat] = t
+				}
+			}
 		}
 
 	case *ssa.Const:
-		// We want to ignore nil values
+		// We want to ignore "return nil".
 		if !t.IsNil() && !l.isAllowed(t.Type()) {
 			l.markDirty(stat, because(t, "constant of type %q", t.Type()))
 		}
@@ -272,7 +311,8 @@ func (l *RetLint) decide(stat *funcStat, val ssa.Value, seen map[ssa.Value]bool)
 		l.decide(stat, t.Tuple, seen)
 
 	case *ssa.MakeInterface:
-		// A value is being wrapped as an interface.
+		// A value is being wrapped as an interface, often implicitly.
+		// SomeInterface(x)
 		l.decide(stat, t.X, seen)
 
 	case *ssa.Phi:
@@ -293,13 +333,15 @@ func (l *RetLint) decide(stat *funcStat, val ssa.Value, seen map[ssa.Value]bool)
 		}
 
 	case *ssa.TypeAssert:
+		// An explicit type assertion or the result of a type-switch.
 		// x, ok := y.(*Something)
 		if !l.isAllowed(t.AssertedType) {
 			l.markDirty(stat, because(t, "assertion to %q", t.AssertedType))
 		}
 
 	case *ssa.UnOp:
-		// This is a dereference operation.
+		// A dereference operation, often implicit.
+		// x := *y
 		if t.Op == token.MUL {
 			l.decide(stat, t.X, seen)
 		}
@@ -349,6 +391,8 @@ func (l *RetLint) extract(fn *ssa.Function) {
 	stat.targetIndexes = targetIndexes
 }
 
+// isAllowed compares the given type to the set of acceptable types.
+// It will also treat a pointer to an acceptable type as acceptable.
 func (l *RetLint) isAllowed(lookAt types.Type) bool {
 	for {
 		switch typ := lookAt.(type) {

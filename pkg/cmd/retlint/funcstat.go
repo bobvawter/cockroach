@@ -32,6 +32,7 @@ const (
 	stateDirty
 )
 
+// clean is a sentinel value.
 var clean = &funcStat{state: stateClean}
 
 type funcStat struct {
@@ -51,6 +52,7 @@ func (s *funcStat) Fn() *ssa.Function {
 	return s.fn
 }
 
+// String is for debugging use only.  See RetLint.Report().
 func (s *funcStat) String() string {
 	if s == clean {
 		return "<Clean>"

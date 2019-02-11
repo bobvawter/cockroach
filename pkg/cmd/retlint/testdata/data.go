@@ -34,9 +34,26 @@ type GoodValError struct{}
 
 func (GoodValError) Error() string { return "Good" }
 
+type ReturnsGood interface {
+	// All known implementors of this method return a good value.
+	error() error
+}
+
+type ReturnsGoodImpl struct{}
+
+func (ReturnsGoodImpl) error() error {
+	return &GoodPtrError{}
+}
+
+type ReturnsGoodImpl2 struct{}
+
+func (ReturnsGoodImpl2) error() error { return GoodValError{} }
+
 var (
-	_ error = &GoodPtrError{}
-	_ error = GoodValError{}
+	_ error       = &GoodPtrError{}
+	_ error       = GoodValError{}
+	_ ReturnsGood = ReturnsGoodImpl{}
+	_ ReturnsGood = ReturnsGoodImpl2{}
 )
 
 func DirectBad() error {
@@ -124,6 +141,14 @@ func EnsureGoodValWithSwitch(err error) error {
 
 func MakesIndirectCall(fn func() error) error {
 	return fn()
+}
+
+func MakesInterfaceCallBad(g Selfish) error {
+	return g.Self()
+}
+
+func MakesInterfaceCallGood(g ReturnsGood) error {
+	return g.error()
 }
 
 func NoopGood() {}
