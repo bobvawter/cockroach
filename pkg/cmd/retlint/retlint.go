@@ -28,6 +28,8 @@ import (
 	"golang.org/x/tools/go/ssa/ssautil"
 )
 
+// DirtyFunction contains a function which did not pass the required
+// check and the reasons why.
 type DirtyFunction interface {
 	// Fn returns the dirty function.
 	Fn() *ssa.Function
@@ -39,6 +41,8 @@ type DirtyFunction interface {
 	Why() []DirtyReason
 }
 
+// DirtyReason describes why a particular value does not pass the
+// required check.
 type DirtyReason struct {
 	Reason string
 	Value  ssa.Value
@@ -49,7 +53,7 @@ func because(value ssa.Value, reason string, args ...interface{}) []DirtyReason 
 	return []DirtyReason{{fmt.Sprintf(reason, args...), value}}
 }
 
-// RetLint analyses functions which return an interface type. It will
+// RetLint analyzes functions which return an interface type. It will
 // attempt to determine if all concrete values which implement the
 // interface are members of an "acceptable" set of types.
 //
@@ -456,9 +460,8 @@ func resolve(pgm *ssa.Program, typeName string) (*types.Named, error) {
 	}
 	if named, ok := found.(*types.Named); ok {
 		return named, nil
-	} else {
-		return nil, fmt.Errorf("%q was not a named type", tgtName)
 	}
+	return nil, fmt.Errorf("%q was not a named type", tgtName)
 }
 
 // stat creates a memoized funcStat to hold extracted information about
