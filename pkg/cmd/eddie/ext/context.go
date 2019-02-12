@@ -55,9 +55,12 @@ type Context interface {
 // magic comment of the form
 //   contract:SomeContractName
 //
+// It is acceptable for multiple contracts to be applied to the same
+// object.
+//
 // Additional configuration may be provided to contract instances
 // by writing a json object, which will be unmarshalled into an
-// instance of the contrat struct.
+// instance of the contract struct.
 //   contract:ConfigurableContract { "someKey" : "someValue", ... }
 //
 // It is acceptable for the json literal to span multiple lines.
