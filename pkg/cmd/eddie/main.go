@@ -80,7 +80,13 @@ func (e *Eddie) Execute() error {
 		}
 	}
 
+	// Now that we've found the contracts to link into the enforcer binary,
+	// we'll generate the contract registry.
 	fmt.Println(contracts)
+
+	// Compile the binary.
+
+	// Execute the binary against the actual targets.
 
 	return nil
 }
