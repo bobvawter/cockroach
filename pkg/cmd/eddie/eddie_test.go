@@ -1,13 +1,25 @@
 package main
 
-import "testing"
+import (
+	"io/ioutil"
+	"testing"
+
+	"github.com/stretchr/testify/assert"
+)
 
 func Test(t *testing.T) {
+	a := assert.New(t)
+
+	exe, err := ioutil.TempFile("", "eddie")
+	if !a.NoError(err) {
+		return
+	}
+
 	e := Eddie{
-		Dir:      "./testdata",
+		Dir:      "./demo",
+		Outfile:  exe.Name(),
 		Packages: []string{"."},
 	}
-	if err := e.Execute(); err != nil {
-		t.Fatal(err)
-	}
+
+	a.NoError(e.Execute())
 }

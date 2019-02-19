@@ -49,6 +49,25 @@ type Context interface {
 	Reportf(l Located, msg string, args ...interface{})
 }
 
+type RetLint struct {
+	AllowedTypeNames []string
+	TargetInterface  string
+}
+
+func (r *RetLint) Enforce(ctx Context) {
+
+}
+
+var _ Contract = &RetLint{}
+
+type SomeIntf interface {
+	//contract:PgErrLinter
+	DoSomething() error
+}
+
+//contract:RetLint { "AllowedTypeNames" : ["github.../pgerror.Error"], "TargetInterface":"error" }
+type PgErrLinter Contract
+
 // A Contract implements some correctness-checking logic.
 //
 // Contracts are associated with a specific object by using a
@@ -121,6 +140,13 @@ type Context interface {
 //   func (*NotSeen) SomeMethod() { ... }
 //   context.Declaration() := (SomeIntf).SomeMethod()
 //   context.Objects() := [ (*Impl1).SomeMethod(), (*Impl2).SomeMethod() ]
+//
+// Reusable contracts may be declared by declaring a type derived from
+// Contract.
+//   //contract:RetLint { "AllowedTypeNames" : ["github.../pgerror.Error"], "TargetInterface":"error" }
+//   type PgErrLinter Contract
+//
+// TODO: Contracts may be placed on a package
 //
 // Lastly, failing to abide by a contract results in BigEddie being
 // unhappy. You wouldn't want BigEddie to be unhappy, would you?

@@ -14,5 +14,16 @@ type Enforcer struct {
 
 func (e *Enforcer) Main() {
 	println(len(e.Contracts))
+
 	os.Exit(0)
+}
+
+func (e *Enforcer) execute() {
+	// Load the source
+
+	// Look for contract declarations
+	// - Need to handle "forward-declared" contract aliases.
+	// - Want to build up the datastructures that make the next pass easier
+
+	// Aggregate contract declarations and resulting members.
 }
