@@ -21,14 +21,9 @@ import (
 	"golang.org/x/tools/go/ssa"
 )
 
-// The framework will look for these kinds of type-assertion
-// declarations when deciding whether or not some type implements the
-// Contract interface or when looking for structs that implement an
-// interface which participates in a contract.
 var (
-	_ ext.Contract  = MustReturnInt{}
-	_ ReturnsNumber = ShouldPass{}
-	_ ReturnsNumber = ShouldFail{}
+	_ ext.Contract = &CanGoHere{}
+	_ ext.Contract = MustReturnInt{}
 )
 
 // MustReturnInt is an example of a trivial, but configurable, contract.
@@ -68,25 +63,9 @@ func (m MustReturnInt) Enforce(ctx ext.Context) {
 	}
 }
 
-// ReturnsNumber defines a contract on its only method.
-type ReturnsNumber interface {
-	// This is a normal doc-comment, except that it has a magic
-	// comment below, consisting of a contract name and a
-	// JSON block which will be unmarshalled into the contract
-	// struct instance.
-	//
-	//contract:MustReturnInt { "Expected" : 1 }
-	ReturnOne() int
-}
+// CanGoHere is a no-op Contract which exists for documentation
+// and testing purposes.
+type CanGoHere struct{}
 
-type ShouldPass struct{}
-
-func (ShouldPass) ReturnOne() int {
-	return 1
-}
-
-type ShouldFail struct{}
-
-func (ShouldFail) ReturnOne() int {
-	return 0
-}
+// Enforce implements the Contract interface and is a no-op.
+func (*CanGoHere) Enforce(ctx ext.Context) {}

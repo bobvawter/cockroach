@@ -49,25 +49,6 @@ type Context interface {
 	Reportf(l Located, msg string, args ...interface{})
 }
 
-type RetLint struct {
-	AllowedTypeNames []string
-	TargetInterface  string
-}
-
-func (r *RetLint) Enforce(ctx Context) {
-
-}
-
-var _ Contract = &RetLint{}
-
-type SomeIntf interface {
-	//contract:PgErrLinter
-	DoSomething() error
-}
-
-//contract:RetLint { "AllowedTypeNames" : ["github.../pgerror.Error"], "TargetInterface":"error" }
-type PgErrLinter Contract
-
 // A Contract implements some correctness-checking logic.
 //
 // Contracts are associated with a specific object by using a
@@ -82,7 +63,7 @@ type PgErrLinter Contract
 // instance of the contract struct.
 //   contract:ConfigurableContract { "someKey" : "someValue", ... }
 //
-// It is acceptable for the json literal to span multiple lines.
+// The entirety of the json literal must occur on the same line.
 //
 // There is a one-to-one mapping of an instance of a Contract with a
 // contract declaration in the underlying source code. The specific

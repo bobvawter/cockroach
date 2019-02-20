@@ -1,3 +1,17 @@
+// Copyright 2019 The Cockroach Authors.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or
+// implied. See the License for the specific language governing
+// permissions and limitations under the License.
+
 package gen
 
 import (
@@ -25,13 +39,16 @@ func TestCompileAndLoad(t *testing.T) {
 		Name:     "gen_test",
 		Outfile:  exe.Name(),
 		Packages: []string{"../demo"},
-		plugin:   true,
+		Plugin:   true,
 	}
 	a.NoError(e.Execute())
-	a.Len(e.contracts, 1)
 
-	// Now try to open the plugin.
+	// Now try to open the plugin. This is only (currently) supported on
+	// mac and linux platforms.
 	plg, err := plugin.Open(exe.Name())
+	if err != nil && err.Error() == "plugin: not implemented" {
+		t.SkipNow()
+	}
 	if !a.NoError(err) {
 		return
 	}
@@ -42,5 +59,5 @@ func TestCompileAndLoad(t *testing.T) {
 	}
 
 	impl := sym.(*rt.Enforcer)
-	a.Len(impl.Contracts, len(e.contracts))
+	a.Len(impl.Contracts, 2)
 }

@@ -1,53 +1,87 @@
+// Copyright 2019 The Cockroach Authors.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or
+// implied. See the License for the specific language governing
+// permissions and limitations under the License.
+
+// Package rt contains the runtime code which will support a generated
+// enforcer binary.
 package rt
 
 import (
 	"fmt"
-	"os"
+	"go/ast"
+	"go/token"
+	"go/types"
+	"regexp"
+	"sort"
 
-	"github.com/cockroachdb/cockroach/pkg/cmd/eddie/ext"
-	"github.com/spf13/cobra"
+	"golang.org/x/tools/go/packages"
 )
 
-type Enforcer struct {
-	// Contracts contains providers for the various Contract types.
-	// This map is the primary point of code-generation.
-	Contracts map[string]func() ext.Contract
-	Name      string
+var commentSyntax = regexp.MustCompile(`(?m)^//[\w]*contract:([\w]+)(.*)$`)
+
+type target struct {
+	config   string
+	contract string
+	node     ast.Node
+	pkg      *packages.Package
+	pos      token.Pos
+	typ      types.Type
 }
 
-func (e *Enforcer) Main() {
-	root := cobra.Command{
-		Use:          e.Name,
-		SilenceUsage: true,
-		RunE: func(cmd *cobra.Command, args []string) error {
-			return nil
-		},
+// Pos implement the Located interface.
+func (t *target) Pos() token.Pos {
+	return t.pos
+}
+
+// String is for debugging use only.
+func (t *target) String() string {
+	return fmt.Sprintf("%s %s %s",
+		t.pkg.Fset.Position(t.Pos()), t.contract, t.config)
+}
+
+// An assertion represents a top-level declaration of the forms
+//   var _ SomeInterface = SomeStruct{}
+//   var _ SomeInterface = &SomeStruct{}
+type assertion struct {
+	// A named interface type.
+	intf *types.Named
+	pkg  *packages.Package
+	pos  token.Pos
+	// Indicates that the interface is implemented using pointer receivers.
+	ptr bool
+	// A named struct type.
+	str *types.Named
+}
+
+// Pos implements the Located interface.
+func (a *assertion) Pos() token.Pos {
+	return a.pos
+}
+
+// String is for debugging use only.
+func (a *assertion) String() string {
+	var ptr = ""
+	if a.ptr {
+		ptr = "&"
 	}
-
-	root.AddCommand(
-		&cobra.Command{
-			Use:   "contracts",
-			Short: "Lists all defined contracts",
-			Run: func(cmd *cobra.Command, _ []string) {
-				for name := range e.Contracts {
-					cmd.Println(name)
-				}
-			},
-		})
-
-	if err := root.Execute(); err != nil {
-		fmt.Println(err)
-		os.Exit(1)
-	}
-	os.Exit(0)
+	return fmt.Sprintf("%s var _ %s = %s%s{}",
+		a.pkg.Fset.Position(a.pos), a.intf.Obj().Id(), ptr, a.str.Obj().Id())
 }
 
-func (e *Enforcer) execute() {
-	// Load the source
+type posses []token.Pos
 
-	// Look for contract declarations
-	// - Need to handle "forward-declared" contract aliases.
-	// - Want to build up the datastructures that make the next pass easier
+var _ sort.Interface = posses{}
 
-	// Aggregate contract declarations and resulting members.
-}
+func (p posses) Len() int           { return len(p) }
+func (p posses) Less(i, j int) bool { return p[i] < p[j] }
+func (p posses) Swap(i, j int)      { p[i], p[j] = p[j], p[i] }

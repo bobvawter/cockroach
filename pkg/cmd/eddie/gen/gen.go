@@ -50,7 +50,7 @@ type Eddie struct {
 
 	// For testing only, causes the compiled enforcer to be emitted
 	// as a golang plugin.
-	plugin bool
+	Plugin bool
 }
 
 func (e *Eddie) Execute() error {
@@ -217,7 +217,7 @@ func main() {
 	}
 
 	args := []string{"build", "-o", exe}
-	if e.plugin {
+	if e.Plugin {
 		args = append(args, "-buildmode=plugin")
 	}
 	args = append(args, main)
