@@ -27,8 +27,8 @@ var (
 // ReturnsNumber defines a contract on its only method.
 //contract:CanGoHere
 type ReturnsNumber interface {
-	// This is a normal doc-comment, except that it has a magic
-	// comment below, consisting of a contract name and a
+	// This is a normal doc-comment, except that it has magic
+	// comments below, consisting of a contract name and a
 	// JSON block which will be unmarshalled into the contract
 	// struct instance.
 	//

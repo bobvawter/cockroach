@@ -118,7 +118,7 @@ func (e *Enforcer) execute(ctx context.Context) error {
 
 	// Look for contract declarations on the AST side before we go through
 	// the bother of converting to SSA form
-	if err := e.findTargets(ctx); err != nil {
+	if err := e.findContracts(ctx); err != nil {
 		return err
 	}
 
@@ -132,26 +132,23 @@ func (e *Enforcer) execute(ctx context.Context) error {
 	return nil
 }
 
-// findTargets performs AST-level extraction.  Specifically, it will
+// findContracts performs AST-level extraction.  Specifically, it will
 // find AST nodes which have been annotated with a contract declaration
 // as well as type-assertion assignments.
-func (e *Enforcer) findTargets(ctx context.Context) error {
+func (e *Enforcer) findContracts(ctx context.Context) error {
 	g, ctx := errgroup.WithContext(ctx)
 
 	// mu protects the variables shared between goroutines.
-	mu := struct {
+	var mu struct {
 		syncutil.Mutex
-		assertions map[token.Pos]*assertion
-		targets    map[token.Pos]*target
-	}{
-		assertions: make(map[token.Pos]*assertion),
-		targets:    make(map[token.Pos]*target),
+		assertions assertions
+		targets    targets
 	}
 
 	addAssertion := func(a *assertion) {
-		e.println(a)
+		e.println("assertion", a)
 		mu.Lock()
-		mu.assertions[a.Pos()] = a
+		mu.assertions = append(mu.assertions, a)
 		mu.Unlock()
 	}
 
@@ -171,9 +168,9 @@ func (e *Enforcer) findTargets(ctx context.Context) error {
 						typ:      pkg.TypesInfo.TypeOf(typ),
 					}
 
-					e.println(tgt)
+					e.println("target", tgt)
 					mu.Lock()
-					mu.targets[tgt.Pos()] = tgt
+					mu.targets = append(mu.targets, tgt)
 					mu.Unlock()
 				}
 			}
@@ -188,12 +185,6 @@ func (e *Enforcer) findTargets(ctx context.Context) error {
 		}
 
 		for _, file := range pkg.Syntax {
-			if false {
-				var sb strings.Builder
-				ast.Fprint(&sb, pkg.Fset, file, nil)
-				e.println(sb.String())
-			}
-
 			// Capture loop vars.
 			pkg := pkg
 			file := file
@@ -304,26 +295,10 @@ func (e *Enforcer) findTargets(ctx context.Context) error {
 	}
 
 	// Produce stable output.
-	aKeys := make(posses, 0, len(mu.assertions))
-	for pos := range mu.assertions {
-		aKeys = append(aKeys, pos)
-	}
-	sort.Sort(aKeys)
-	e.assertions = make([]*assertion, len(aKeys))
-	for idx, pos := range aKeys {
-		e.assertions[idx] = mu.assertions[pos]
-	}
-
-	tKeys := make(posses, 0, len(mu.targets))
-	for pos := range mu.targets {
-		tKeys = append(tKeys, pos)
-	}
-	sort.Sort(tKeys)
-	e.targets = make([]*target, len(tKeys))
-	for idx, pos := range tKeys {
-		e.targets[idx] = mu.targets[pos]
-	}
-
+	sort.Sort(mu.assertions)
+	sort.Sort(mu.targets)
+	e.assertions = mu.assertions
+	e.targets = mu.targets
 	return nil
 }
 
