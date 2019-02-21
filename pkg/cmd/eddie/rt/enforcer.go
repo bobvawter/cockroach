@@ -23,6 +23,7 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"runtime"
 	"sort"
 	"strings"
 	"syscall"
@@ -149,9 +150,11 @@ func (e *Enforcer) execute(ctx context.Context) error {
 // findContracts performs AST-level extraction.  Specifically, it will
 // find AST nodes which have been annotated with a contract declaration
 // as well as type-assertion assignments.
+//
+// Since we're operating on a per-ast.File basis, we want to operate as
+// concurrently as possible. We'll set up a limited number of goroutines
+// and feed them (package, file) pairs.
 func (e *Enforcer) findContracts(ctx context.Context) error {
-	g, ctx := errgroup.WithContext(ctx)
-
 	// mu protects the variables shared between goroutines.
 	mu := struct {
 		syncutil.Mutex
@@ -162,6 +165,7 @@ func (e *Enforcer) findContracts(ctx context.Context) error {
 		aliases: make(targetAliases),
 	}
 
+	// addAssertion updates mu.assertions in a safe manner.
 	addAssertion := func(a *assertion) {
 		e.println("assertion", a)
 		mu.Lock()
@@ -169,8 +173,8 @@ func (e *Enforcer) findContracts(ctx context.Context) error {
 		mu.Unlock()
 	}
 
-	// contract determine if the node has a contract comment.  If so, a
-	// new target will be created.
+	// contract will update mu.targets if the provided comments contain
+	// a contract declaration. It will also extract contract aliases.
 	contract := func(pkg *packages.Package, comments []*ast.CommentGroup, node ast.Node, typ ast.Expr) {
 		for _, group := range comments {
 			for _, comment := range group.List {
@@ -202,11 +206,123 @@ func (e *Enforcer) findContracts(ctx context.Context) error {
 		}
 	}
 
-	// We want to resolve the ext.Contract interface object as we cycle
-	// through the
-	//	var contractIntf *types.Interface
+	// process performs the bulk of the work in this method.
+	process := func(ctx context.Context, pkg *packages.Package, file *ast.File) error {
+		// CommentMap associates each node in the file with
+		// its surrounding comments.
+		comments := ast.NewCommentMap(pkg.Fset, file, file.Comments)
 
-	// Set up a parallel for-each loop over every input ast.File.
+		// Now we'll inspect the ast.File and look for our magic
+		// comment syntax.
+		ast.Inspect(file, func(node ast.Node) bool {
+			// We'll see a node==nil as the very last call.
+			if node == nil {
+				return false
+			}
+
+			switch t := node.(type) {
+			case *ast.Field:
+				// Fields of a function type, such as
+				//   type I interface { func Blah() }
+				//   type S struct { Blah func() }
+				if funcType, ok := t.Type.(*ast.FuncType); ok {
+					contract(pkg, comments[t], t, funcType)
+				}
+				return false
+
+			case *ast.FuncDecl:
+				// Top-level function or method declarations, such as
+				//   func Foo() { .... }
+				//   func (r Receiver) Bar() { ... }
+				contract(pkg, comments[t], t, t.Type)
+				// We don't need to descend into function bodies.
+				return false
+
+			case *ast.GenDecl:
+				switch t.Tok {
+				case token.TYPE:
+					// Type declarations, such as
+					//   type Foo struct { ... }
+					//   type Bar interface { ... }
+					for _, spec := range t.Specs {
+						tSpec := spec.(*ast.TypeSpec)
+						// Handle the usual case where contract is associated
+						// with the type keyword.
+						contract(pkg, comments[t], tSpec, tSpec.Name)
+						// Handle unusual case where a type() block is being used
+						// and a contract is specified on the entry.
+						contract(pkg, comments[tSpec], tSpec, tSpec.Name)
+						// We do need to descend into interfaces to pick up on
+						// contracts applied only to interface methods.
+						_, ok := tSpec.Type.(*ast.InterfaceType)
+						return ok
+					}
+
+				case token.VAR:
+					// Assertion declarations, such as
+					//   var _ Intf = &Impl{}
+					//   var _ Intf = Impl{}
+					for _, spec := range t.Specs {
+						v := spec.(*ast.ValueSpec)
+						if len(v.Values) == 1 && v.Names[0].Name == "_" {
+							if named, ok := pkg.TypesInfo.TypeOf(v.Type).(*types.Named); ok {
+								if intf, ok := named.Underlying().(*types.Interface); ok {
+									a := assertion{intf: named, pkg: pkg, pos: v.Pos()}
+									switch v := pkg.TypesInfo.TypeOf(v.Values[0]).(type) {
+									case *types.Named:
+										if _, ok := v.Underlying().(*types.Struct); ok {
+											a.str = v
+										}
+									case *types.Pointer:
+										if named, ok := v.Elem().(*types.Named); ok {
+											if _, ok := named.Underlying().(*types.Struct); ok {
+												a.str = named
+											}
+										}
+									}
+									if a.str != nil {
+										a.ptr = !types.Implements(a.str, intf)
+										addAssertion(&a)
+									}
+								}
+							}
+						}
+					}
+				}
+				return false
+			default:
+				return true
+			}
+		})
+		return nil
+	}
+
+	type work struct {
+		pkg  *packages.Package
+		file *ast.File
+	}
+	workCh := make(chan work, 1)
+
+	g, ctx := errgroup.WithContext(ctx)
+	for i := 0; i < runtime.NumCPU(); i++ {
+		g.Go(func() error {
+			for {
+				select {
+				case work, open := <-workCh:
+					if !open {
+						return nil
+					}
+					if err := process(ctx, work.pkg, work.file); err != nil {
+						return err
+					}
+				case <-ctx.Done():
+					return ctx.Err()
+				}
+			}
+		})
+	}
+
+sendLoop:
 	for _, pkg := range e.pkgs {
 		// See discussion on package.Config type for the naming scheme.
 		if e.Tests && !strings.HasSuffix(pkg.ID, ".test]") {
@@ -214,111 +330,16 @@ func (e *Enforcer) findContracts(ctx context.Context) error {
 		}
 
 		for _, file := range pkg.Syntax {
-			// Capture loop vars.
-			pkg := pkg
-			file := file
-			g.Go(func() error {
-				if ctx.Err() != nil {
-					return nil
-				}
-
-				// CommentMap associates each node in the file with
-				// its surrounding comments.
-				comments := ast.NewCommentMap(pkg.Fset, file, file.Comments)
-
-				// Now we'll inspect the ast.File and look for our magic
-				// comment syntax.
-				count := 0
-				ast.Inspect(file, func(node ast.Node) bool {
-					// We'll see a node==nil as the very last call.
-					if node == nil {
-						return false
-					}
-					// Occasionally check for cancellation.
-					if count%1000 == 0 && ctx.Err() != nil {
-						return false
-					}
-					count++
-
-					switch t := node.(type) {
-					case *ast.Field:
-						// Fields of a function type, such as
-						//   type I interface { func Blah() }
-						//   type S struct { Blah func() }
-						if funcType, ok := t.Type.(*ast.FuncType); ok {
-							contract(pkg, comments[t], t, funcType)
-						}
-						return false
-
-					case *ast.FuncDecl:
-						// Top-level function or method declarations, such as
-						//   func Foo() { .... }
-						//   func (r Receiver) Bar() { ... }
-						contract(pkg, comments[t], t, t.Type)
-						// We don't need to descend into function bodies.
-						return false
-
-					case *ast.GenDecl:
-						switch t.Tok {
-						case token.TYPE:
-							// Type declarations, such as
-							//   type Foo struct { ... }
-							//   type Bar interface { ... }
-							for _, spec := range t.Specs {
-								tSpec := spec.(*ast.TypeSpec)
-								// Handle the usual case where contract is associated
-								// with the type keyword.
-								contract(pkg, comments[t], tSpec, tSpec.Name)
-								// Handle unusual case where a type() block is being used
-								// and a contract is specified on the entry.
-								contract(pkg, comments[tSpec], tSpec, tSpec.Name)
-								// We do need to descend into interfaces to pick up on
-								// contracts applied only to interface methods.
-								_, ok := tSpec.Type.(*ast.InterfaceType)
-								return ok
-							}
-
-						case token.VAR:
-							// Assertion declarations, such as
-							//   var _ Intf = &Impl{}
-							//   var _ Intf = Impl{}
-							for _, spec := range t.Specs {
-								v := spec.(*ast.ValueSpec)
-								if len(v.Values) == 1 && v.Names[0].Name == "_" {
-									if named, ok := pkg.TypesInfo.TypeOf(v.Type).(*types.Named); ok {
-										if intf, ok := named.Underlying().(*types.Interface); ok {
-											a := assertion{intf: named, pkg: pkg, pos: v.Pos()}
-											switch v := pkg.TypesInfo.TypeOf(v.Values[0]).(type) {
-											case *types.Named:
-												if _, ok := v.Underlying().(*types.Struct); ok {
-													a.str = v
-												}
-											case *types.Pointer:
-												if named, ok := v.Elem().(*types.Named); ok {
-													if _, ok := named.Underlying().(*types.Struct); ok {
-														a.str = named
-													}
-												}
-											}
-											if a.str != nil {
-												a.ptr = !types.Implements(a.str, intf)
-												addAssertion(&a)
-											}
-										}
-									}
-								}
-							}
-						}
-						return false
-					default:
-						return true
-					}
-				})
-				return nil
-			})
+			select {
+			case workCh <- work{pkg, file}:
+			case <-ctx.Done():
+				break sendLoop
+			}
 		}
 	}
+	close(workCh)
 
+	// Wait for all the goroutines to exit.
 	if err := g.Wait(); err != nil {
 		return err
 	}
