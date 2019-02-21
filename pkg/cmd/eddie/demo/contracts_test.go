@@ -33,7 +33,9 @@ type ReturnsNumber interface {
 	// struct instance.
 	//
 	//contract:CanGoHere
-	//contract:MustReturnInt { "Expected" : 1 }
+	/* contract:MustReturnInt {
+		"Expected" : 1
+	} */
 	ReturnOne() int
 }
 

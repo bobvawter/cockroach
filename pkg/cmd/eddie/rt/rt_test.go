@@ -31,6 +31,7 @@ func Test(t *testing.T) {
 
 	e := &Enforcer{
 		Contracts: map[string]func() ext.Contract{
+			"CanGoHere":     func() ext.Contract { return &CanGoHere{} },
 			"MustReturnInt": func() ext.Contract { return &demo.MustReturnInt{} },
 		},
 		Dir:      "../demo",
@@ -45,3 +46,7 @@ func Test(t *testing.T) {
 	a.Len(e.assertions, 4)
 	a.Len(e.targets, 7)
 }
+
+type CanGoHere struct{}
+
+func (*CanGoHere) Enforce(ctx ext.Context) {}

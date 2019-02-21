@@ -63,7 +63,15 @@ type Context interface {
 // instance of the contract struct.
 //   contract:ConfigurableContract { "someKey" : "someValue", ... }
 //
-// The entirety of the json literal must occur on the same line.
+// The entirety of the json literal must occur within the same comment.
+// A multiline configuration can be specified when using the /* comment
+// syntax:
+//   /*
+//     contract:ConfigurableContract {
+//       "someKey" : "someValue"
+//     }
+//   */
+//
 //
 // There is a one-to-one mapping of an instance of a Contract with a
 // contract declaration in the underlying source code. The specific

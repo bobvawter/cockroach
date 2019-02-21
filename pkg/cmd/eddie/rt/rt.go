@@ -26,19 +26,42 @@ import (
 	"regexp"
 	"sort"
 
+	"github.com/cockroachdb/cockroach/pkg/cmd/eddie/ext"
 	"golang.org/x/tools/go/packages"
 )
 
-// Example:  contract:SomeContract {....}
-var commentSyntax = regexp.MustCompile(`(?m)^//[[:space:]]*contract:([[:alnum:]]+)(.*)$`)
+// Example:
+//   // contract:SomeContract {....}
+//   /* contract:SomeContract {....} */
+var commentSyntax = regexp.MustCompile(
+	`^(?s)(?://|/\*)[[:space:]]*contract:([[:alnum:]]+)(.*?)(?:\*/)?$`)
 
+//   ^ s-flag enables dot to match newline
+//          ^ Non-capturing group to match leading comment marker
+// Ignore leading WS   ^
+// Look for the literal contract: ^
+//          Contract names are golang idents ^
+//                Configuration data, non-greedy match ^
+//                              Ignore closing block comment ^
+
+// A target describes a binding between a contract and a specific
 type target struct {
-	config   string
+	// The raw JSON configuration string, extracted from the doc comment.
+	config string
+	// The name of the contract, which could be an alias.
 	contract string
-	node     ast.Node
-	pkg      *packages.Package
-	pos      token.Pos
-	typ      types.Type
+	// Populated by Enforcer.expandAll() and contains a ready-to-run
+	// Contract instance.
+	impl ext.Contract
+	// The node on which the contract is bound.
+	node ast.Node
+	// The package in which the contract is bound.
+	pkg *packages.Package
+	// The position of the binding comment.
+	pos token.Pos
+	// The type on which the contract has been placed, usually a
+	// *types.Named.
+	typ types.Type
 }
 
 // Pos implement the Located interface.

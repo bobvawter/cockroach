@@ -16,6 +16,7 @@ package rt
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"go/ast"
 	"go/token"
@@ -30,6 +31,7 @@ import (
 
 	"github.com/cockroachdb/cockroach/pkg/cmd/eddie/ext"
 	"github.com/cockroachdb/cockroach/pkg/util/syncutil"
+	"github.com/pkg/errors"
 	"github.com/spf13/cobra"
 	"golang.org/x/sync/errgroup"
 	"golang.org/x/tools/go/packages"
@@ -137,6 +139,11 @@ func (e *Enforcer) execute(ctx context.Context) error {
 		return err
 	}
 
+	// Expand any alias
+	if err := e.expandAll(ctx); err != nil {
+		return err
+	}
+
 	// Convert to SSA form.
 	//	pgm, ssaPkgs := ssautil.AllPackages(pkgs, 0 /* mode */)
 
@@ -181,7 +188,7 @@ func (e *Enforcer) findContracts(ctx context.Context) error {
 				matches := commentSyntax.FindAllStringSubmatch(comment.Text, -1)
 				for _, match := range matches {
 					tgt := &target{
-						config:   match[2],
+						config:   strings.TrimSpace(match[2]),
 						contract: match[1],
 						node:     node,
 						pkg:      pkg,
@@ -362,4 +369,76 @@ func (e *Enforcer) println(args ...interface{}) {
 	if l := e.Logger; l != nil {
 		l.Println(args...)
 	}
+}
+
+// expand expands alias targets into their final form or returns
+// terminal targets as-is.
+func (e *Enforcer) expand(base *target) ([]*target, error) {
+	// Non-terminal targets, which need to be further expanded
+	nonTerm := e.aliases[base.contract]
+	if nonTerm == nil {
+		return targets{base}, nil
+	}
+
+	// The terminal targets, which we will want to return.
+	var term targets
+	// Detect recursively-defined contracts.  This would only be an
+	// issue with contract aliases that are mutually-referent.
+	seen := map[*target]bool{base: true}
+
+	for len(nonTerm) > 0 {
+		work := append(targets(nil), nonTerm...)
+		nonTerm = nonTerm[:0]
+		for _, alias := range work {
+			if seen[alias] {
+				return nil, errors.Errorf("%s detected recursive contract %q",
+					base.pkg.Fset.Position(base.Pos()), alias.contract)
+			}
+			seen[alias] = true
+			if moreExpansions := e.aliases[alias.contract]; moreExpansions != nil {
+				nonTerm = append(nonTerm, moreExpansions...)
+			} else {
+				dup := *base
+				dup.contract = alias.contract
+				dup.config = alias.config
+				term = append(term, &dup)
+			}
+		}
+	}
+	sort.Sort(term)
+	return term, nil
+}
+
+// expandAll resolves all targets to actual Contract implementations,
+// performing alias expansion and configuration. Once this method has
+// finished, the Enforcer.targets field will be populated with all work
+// to perform.
+func (e *Enforcer) expandAll(ctx context.Context) error {
+	expanded := make(targets, 0, len(e.targets))
+	for _, tgt := range e.targets {
+		expansion, err := e.expand(tgt)
+		if err != nil {
+			return err
+		}
+		expanded = append(expanded, expansion...)
+	}
+
+	for _, tgt := range expanded {
+		provider := e.Contracts[tgt.contract]
+		if provider == nil {
+			return errors.Errorf("%s: cannot find contract named %s",
+				tgt.pkg.Fset.Position(tgt.Pos()), tgt.contract)
+		}
+		tgt.impl = provider()
+		if tgt.config != "" {
+			// Disallow unknown fields to help with typos.
+			d := json.NewDecoder(strings.NewReader(tgt.config))
+			d.DisallowUnknownFields()
+			if err := d.Decode(&tgt.impl); err != nil {
+				return errors.Wrap(err, tgt.pkg.Fset.Position(tgt.Pos()).String())
+			}
+		}
+	}
+	e.targets = expanded
+	return nil
 }
