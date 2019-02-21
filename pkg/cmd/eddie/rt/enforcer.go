@@ -52,9 +52,12 @@ type Enforcer struct {
 	// If true, the test sources for the package will be included.
 	Tests bool
 
-	assertions []*assertion
-	pkgs       []*packages.Package
-	targets    []*target
+	aliases      targetAliases
+	allPackages  map[string]*packages.Package
+	assertions   []*assertion
+	contractType *types.Interface
+	pkgs         []*packages.Package
+	targets      []*target
 }
 
 // Main is called by the generated main() code.
@@ -114,6 +117,17 @@ func (e *Enforcer) execute(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+
+	e.allPackages = flattenImports(pkgs)
+
+	// If the user has imported the ext package, they may have declared
+	// contract aliases.  We'll need to find the underlying interface type.
+	if extPkg := e.allPackages["github.com/cockroachdb/cockroach/pkg/cmd/eddie/ext"]; extPkg != nil {
+		if obj := extPkg.Types.Scope().Lookup("Contract"); obj != nil {
+			e.contractType = obj.Type().Underlying().(*types.Interface)
+		}
+	}
+
 	e.pkgs = pkgs
 
 	// Look for contract declarations on the AST side before we go through
@@ -139,10 +153,13 @@ func (e *Enforcer) findContracts(ctx context.Context) error {
 	g, ctx := errgroup.WithContext(ctx)
 
 	// mu protects the variables shared between goroutines.
-	var mu struct {
+	mu := struct {
 		syncutil.Mutex
+		aliases    targetAliases
 		assertions assertions
 		targets    targets
+	}{
+		aliases: make(targetAliases),
 	}
 
 	addAssertion := func(a *assertion) {
@@ -154,8 +171,8 @@ func (e *Enforcer) findContracts(ctx context.Context) error {
 
 	// contract determine if the node has a contract comment.  If so, a
 	// new target will be created.
-	contract := func(pkg *packages.Package, comments ast.CommentMap, node ast.Node, typ ast.Expr) {
-		for _, group := range comments[node] {
+	contract := func(pkg *packages.Package, comments []*ast.CommentGroup, node ast.Node, typ ast.Expr) {
+		for _, group := range comments {
 			for _, comment := range group.List {
 				matches := commentSyntax.FindAllStringSubmatch(comment.Text, -1)
 				for _, match := range matches {
@@ -170,12 +187,24 @@ func (e *Enforcer) findContracts(ctx context.Context) error {
 
 					e.println("target", tgt)
 					mu.Lock()
+					// Special case for contract aliases of the form
+					//   //contract:Foo { ... }
+					//   type Alias ext.Contract
+					if named, ok := tgt.typ.(*types.Named); ok && tgt.typ.Underlying() == e.contractType {
+						name := named.Obj().Name()
+						e.println("alias", name, ":=", tgt)
+						mu.aliases[name] = append(mu.aliases[name], tgt)
+					}
 					mu.targets = append(mu.targets, tgt)
 					mu.Unlock()
 				}
 			}
 		}
 	}
+
+	// We want to resolve the ext.Contract interface object as we cycle
+	// through the
+	//	var contractIntf *types.Interface
 
 	// Set up a parallel for-each loop over every input ast.File.
 	for _, pkg := range e.pkgs {
@@ -217,7 +246,7 @@ func (e *Enforcer) findContracts(ctx context.Context) error {
 						//   type I interface { func Blah() }
 						//   type S struct { Blah func() }
 						if funcType, ok := t.Type.(*ast.FuncType); ok {
-							contract(pkg, comments, t, funcType)
+							contract(pkg, comments[t], t, funcType)
 						}
 						return false
 
@@ -225,7 +254,7 @@ func (e *Enforcer) findContracts(ctx context.Context) error {
 						// Top-level function or method declarations, such as
 						//   func Foo() { .... }
 						//   func (r Receiver) Bar() { ... }
-						contract(pkg, comments, t, t.Type)
+						contract(pkg, comments[t], t, t.Type)
 						// We don't need to descend into function bodies.
 						return false
 
@@ -236,16 +265,16 @@ func (e *Enforcer) findContracts(ctx context.Context) error {
 							//   type Foo struct { ... }
 							//   type Bar interface { ... }
 							for _, spec := range t.Specs {
-								v := spec.(*ast.TypeSpec)
+								tSpec := spec.(*ast.TypeSpec)
 								// Handle the usual case where contract is associated
 								// with the type keyword.
-								contract(pkg, comments, t, v.Type)
+								contract(pkg, comments[t], tSpec, tSpec.Name)
 								// Handle unusual case where a type() block is being used
 								// and a contract is specified on the entry.
-								contract(pkg, comments, v, v.Type)
+								contract(pkg, comments[tSpec], tSpec, tSpec.Name)
 								// We do need to descend into interfaces to pick up on
 								// contracts applied only to interface methods.
-								_, ok := v.Type.(*ast.InterfaceType)
+								_, ok := tSpec.Type.(*ast.InterfaceType)
 								return ok
 							}
 
@@ -295,8 +324,13 @@ func (e *Enforcer) findContracts(ctx context.Context) error {
 	}
 
 	// Produce stable output.
+	for _, aliases := range mu.aliases {
+		sort.Sort(aliases)
+	}
 	sort.Sort(mu.assertions)
 	sort.Sort(mu.targets)
+
+	e.aliases = mu.aliases
 	e.assertions = mu.assertions
 	e.targets = mu.targets
 	return nil

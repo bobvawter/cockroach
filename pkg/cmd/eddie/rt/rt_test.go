@@ -41,6 +41,7 @@ func Test(t *testing.T) {
 
 	a.NoError(e.execute(context.Background()))
 
+	a.Len(e.aliases, 1)
 	a.Len(e.assertions, 4)
 	a.Len(e.targets, 7)
 }
