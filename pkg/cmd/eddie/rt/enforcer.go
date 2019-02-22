@@ -35,6 +35,8 @@ import (
 	"github.com/spf13/cobra"
 	"golang.org/x/sync/errgroup"
 	"golang.org/x/tools/go/packages"
+	"golang.org/x/tools/go/ssa"
+	"golang.org/x/tools/go/ssa/ssautil"
 )
 
 // Enforcer is the main entrypoint for a generated linter binary.
@@ -60,6 +62,7 @@ type Enforcer struct {
 	assertions   []*assertion
 	contractType *types.Interface
 	pkgs         []*packages.Package
+	ssaPgm       *ssa.Program
 	targets      []*target
 }
 
@@ -107,6 +110,11 @@ func (e *Enforcer) Main() {
 	os.Exit(0)
 }
 
+// enforce performs enforcement on a single target.
+func (e *Enforcer) enforce(tgt *target) error {
+
+}
+
 // execute is used by tests.
 func (e *Enforcer) execute(ctx context.Context) error {
 	// Load the source
@@ -120,6 +128,7 @@ func (e *Enforcer) execute(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	e.pkgs = pkgs
 
 	e.allPackages = flattenImports(pkgs)
 
@@ -131,7 +140,9 @@ func (e *Enforcer) execute(ctx context.Context) error {
 		}
 	}
 
-	e.pkgs = pkgs
+	// Prep SSA program. We'll defer building the packages until we
+	// need to present a function to a Contract.
+	e.ssaPgm, _ = ssautil.AllPackages(pkgs, 0 /* mode */)
 
 	// Look for contract declarations on the AST side before we go through
 	// the bother of converting to SSA form
@@ -139,18 +150,89 @@ func (e *Enforcer) execute(ctx context.Context) error {
 		return err
 	}
 
-	// Expand any alias
+	// Expand aliases and initialize Contract instances.
 	if err := e.expandAll(ctx); err != nil {
 		return err
 	}
 
-	// Convert to SSA form.
-	//	pgm, ssaPkgs := ssautil.AllPackages(pkgs, 0 /* mode */)
+	// Now that we have all of the targets established, we can start
+	// extracting the information that we'll need in order to populate the
+	// contract contexts.
 
-	// - Need to handle "forward-declared" contract aliases.
 	// - Want to build up the datastructures that make the next pass easier
 
-	// Aggregate contract declarations and resulting members.
+	return nil
+}
+
+// expand expands alias targets into their final form or returns
+// terminal targets as-is.
+func (e *Enforcer) expand(base *target) ([]*target, error) {
+	// Non-terminal targets, which need to be further expanded
+	nonTerm := e.aliases[base.contract]
+	if nonTerm == nil {
+		return targets{base}, nil
+	}
+
+	// The terminal targets, which we will want to return.
+	var term targets
+	// Detect recursively-defined contracts.  This would only be an
+	// issue with contract aliases that are mutually-referent.
+	seen := map[*target]bool{base: true}
+
+	for len(nonTerm) > 0 {
+		work := append(targets(nil), nonTerm...)
+		nonTerm = nonTerm[:0]
+		for _, alias := range work {
+			if seen[alias] {
+				return nil, errors.Errorf("%s detected recursive contract %q",
+					base.pkg.Fset.Position(base.Pos()), alias.contract)
+			}
+			seen[alias] = true
+			if moreExpansions := e.aliases[alias.contract]; moreExpansions != nil {
+				nonTerm = append(nonTerm, moreExpansions...)
+			} else {
+				dup := *base
+				dup.contract = alias.contract
+				dup.config = alias.config
+				term = append(term, &dup)
+			}
+		}
+	}
+	sort.Sort(term)
+	return term, nil
+}
+
+// expandAll resolves all targets to actual Contract implementations,
+// performing alias expansion and configuration. Once this method has
+// finished, the Enforcer.targets field will be populated with all work
+// to perform.
+func (e *Enforcer) expandAll(ctx context.Context) error {
+	expanded := make(targets, 0, len(e.targets))
+	for _, tgt := range e.targets {
+		expansion, err := e.expand(tgt)
+		if err != nil {
+			return err
+		}
+		expanded = append(expanded, expansion...)
+	}
+
+	for _, tgt := range expanded {
+		provider := e.Contracts[tgt.contract]
+		if provider == nil {
+			return errors.Errorf("%s: cannot find contract named %s",
+				tgt.pkg.Fset.Position(tgt.Pos()), tgt.contract)
+		}
+		tgt.impl = provider()
+		if tgt.config != "" {
+			// Disallow unknown fields to help with typos.
+			d := json.NewDecoder(strings.NewReader(tgt.config))
+			d.DisallowUnknownFields()
+			if err := d.Decode(&tgt.impl); err != nil {
+				return errors.Wrap(err, tgt.pkg.Fset.Position(tgt.Pos()).String())
+			}
+		}
+	}
+	e.targets = expanded
 	return nil
 }
 
@@ -369,76 +451,4 @@ func (e *Enforcer) println(args ...interface{}) {
 	if l := e.Logger; l != nil {
 		l.Println(args...)
 	}
-}
-
-// expand expands alias targets into their final form or returns
-// terminal targets as-is.
-func (e *Enforcer) expand(base *target) ([]*target, error) {
-	// Non-terminal targets, which need to be further expanded
-	nonTerm := e.aliases[base.contract]
-	if nonTerm == nil {
-		return targets{base}, nil
-	}
-
-	// The terminal targets, which we will want to return.
-	var term targets
-	// Detect recursively-defined contracts.  This would only be an
-	// issue with contract aliases that are mutually-referent.
-	seen := map[*target]bool{base: true}
-
-	for len(nonTerm) > 0 {
-		work := append(targets(nil), nonTerm...)
-		nonTerm = nonTerm[:0]
-		for _, alias := range work {
-			if seen[alias] {
-				return nil, errors.Errorf("%s detected recursive contract %q",
-					base.pkg.Fset.Position(base.Pos()), alias.contract)
-			}
-			seen[alias] = true
-			if moreExpansions := e.aliases[alias.contract]; moreExpansions != nil {
-				nonTerm = append(nonTerm, moreExpansions...)
-			} else {
-				dup := *base
-				dup.contract = alias.contract
-				dup.config = alias.config
-				term = append(term, &dup)
-			}
-		}
-	}
-	sort.Sort(term)
-	return term, nil
-}
-
-// expandAll resolves all targets to actual Contract implementations,
-// performing alias expansion and configuration. Once this method has
-// finished, the Enforcer.targets field will be populated with all work
-// to perform.
-func (e *Enforcer) expandAll(ctx context.Context) error {
-	expanded := make(targets, 0, len(e.targets))
-	for _, tgt := range e.targets {
-		expansion, err := e.expand(tgt)
-		if err != nil {
-			return err
-		}
-		expanded = append(expanded, expansion...)
-	}
-
-	for _, tgt := range expanded {
-		provider := e.Contracts[tgt.contract]
-		if provider == nil {
-			return errors.Errorf("%s: cannot find contract named %s",
-				tgt.pkg.Fset.Position(tgt.Pos()), tgt.contract)
-		}
-		tgt.impl = provider()
-		if tgt.config != "" {
-			// Disallow unknown fields to help with typos.
-			d := json.NewDecoder(strings.NewReader(tgt.config))
-			d.DisallowUnknownFields()
-			if err := d.Decode(&tgt.impl); err != nil {
-				return errors.Wrap(err, tgt.pkg.Fset.Position(tgt.Pos()).String())
-			}
-		}
-	}
-	e.targets = expanded
-	return nil
 }

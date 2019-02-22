@@ -13,43 +13,6 @@
 // permissions and limitations under the License.
 
 // Package ext defines the extension points for creating new contracts.
-package ext
-
-import (
-	"context"
-	"go/token"
-
-	"golang.org/x/tools/go/ssa"
-)
-
-// A Located object is associated with an opaque source location.
-// Most types from the ssa package will implement this interface,
-// as do all of the underlying AST objects.
-type Located interface{ Pos() token.Pos }
-
-// Context defines the interface between a Contract and the supporting
-// framework.
-type Context interface {
-	context.Context
-
-	// Declaration returns the object that the contract declaration is
-	// defined on. See additional discussion on the Contract type.
-	Declaration() ssa.Member
-	// Objects returns a collection of objects that a specific contract
-	// declaration maps to. See additional discussion on the Contract
-	// type.
-	Objects() []ssa.Member
-	// Program returns the SSA Program object which is driving the
-	// analysis.
-	Program() *ssa.Program
-	// Report adds an error message to the output that is associated
-	// with the given object.
-	Report(l Located, msg string)
-	// Reportf is a printf-style variant of Report.
-	Reportf(l Located, msg string, args ...interface{})
-}
-
-// A Contract implements some correctness-checking logic.
 //
 // Contracts are associated with a specific object by using a
 // magic comment of the form
@@ -139,6 +102,43 @@ type Context interface {
 //
 // Lastly, failing to abide by a contract results in BigEddie being
 // unhappy. You wouldn't want BigEddie to be unhappy, would you?
+package ext
+
+import (
+	"context"
+	"go/token"
+
+	"golang.org/x/tools/go/ssa"
+)
+
+// A Located object is associated with an opaque source location.
+// Most types from the ssa package will implement this interface,
+// as do all of the underlying AST objects.
+type Located interface{ Pos() token.Pos }
+
+// Context defines the interface between a Contract and the supporting
+// framework.
+type Context interface {
+	context.Context
+
+	// Declaration returns the object that the contract declaration is
+	// defined on. See additional discussion on the Contract type.
+	Declaration() ssa.Member
+	// Objects returns a collection of objects that a specific contract
+	// declaration maps to. See additional discussion on the Contract
+	// type.
+	Objects() []ssa.Member
+	// Program returns the SSA Program object which is driving the
+	// analysis.
+	Program() *ssa.Program
+	// Report adds an error message to the output that is associated
+	// with the given object.
+	Report(l Located, msg string)
+	// Reportf is a printf-style variant of Report.
+	Reportf(l Located, msg string, args ...interface{})
+}
+
+// A Contract implements some correctness-checking logic.
 type Contract interface {
 	// Enforce will be called on an instance of the Contract automatically
 	// by the runtime.

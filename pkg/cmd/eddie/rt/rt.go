@@ -78,6 +78,8 @@ func (t *target) String() string {
 		thing = "field " + n.Names[0].Name
 	case *ast.FuncDecl:
 		thing = "func " + n.Name.String()
+	case *ast.Package:
+		thing = "package " + n.Name
 	case *ast.TypeSpec:
 		thing = "type " + n.Name.String()
 	default:
