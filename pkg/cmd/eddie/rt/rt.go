@@ -44,6 +44,27 @@ var commentSyntax = regexp.MustCompile(
 //                Configuration data, non-greedy match ^
 //                              Ignore closing block comment ^
 
+//go:generate stringer -type targetKind -trimprefix kind
+
+// targetKind
+type targetKind int
+
+const (
+	// A method declaration like:
+	//   func (r Receiver) Foo() { ... }
+	kindMethod targetKind = iota + 1
+	// A top-level function declaration:
+	//   func Foo () { .... }
+	kindFunction
+	//
+	kindInterface
+	// A method defined in an interface:
+	//   type I interface { Foo() }
+	kindInterfaceMethod
+	// All types other than interface declarations.
+	kindType
+)
+
 // A target describes a binding between a contract and a specific
 type target struct {
 	// The raw JSON configuration string, extracted from the doc comment.
@@ -53,6 +74,8 @@ type target struct {
 	// Populated by Enforcer.expandAll() and contains a ready-to-run
 	// Contract instance.
 	impl ext.Contract
+	// Memoizes the behavior to apply to the target.
+	kind targetKind
 	// The node on which the contract is bound.
 	node ast.Node
 	// The package in which the contract is bound.
@@ -72,22 +95,22 @@ func (t *target) Pos() token.Pos {
 // String is for debugging use only.
 func (t *target) String() string {
 	pos := t.pkg.Fset.Position(t.Pos())
-	thing := ""
+	var thing string
 	switch n := t.node.(type) {
 	case *ast.Field:
-		thing = "field " + n.Names[0].Name
+		thing = n.Names[0].Name
 	case *ast.FuncDecl:
-		thing = "func " + n.Name.String()
+		thing = n.Name.String()
 	case *ast.Package:
-		thing = "package " + n.Name
+		thing = n.Name
 	case *ast.TypeSpec:
-		thing = "type " + n.Name.String()
+		thing = n.Name.String()
 	default:
 		thing = reflect.TypeOf(n).String()
 	}
-	return fmt.Sprintf("%s:%d:%d %s := %s %s",
+	return fmt.Sprintf("%s:%d:%d %s %s := %s %s",
 		filepath.Base(pos.Filename), pos.Line, pos.Column,
-		thing, t.contract, t.config)
+		t.kind, thing, t.contract, t.config)
 }
 
 // An assertion represents a top-level declaration of the forms

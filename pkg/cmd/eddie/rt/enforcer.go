@@ -112,7 +112,7 @@ func (e *Enforcer) Main() {
 
 // enforce performs enforcement on a single target.
 func (e *Enforcer) enforce(tgt *target) error {
-
+	panic("unimplemented")
 }
 
 // execute is used by tests.
@@ -264,7 +264,13 @@ func (e *Enforcer) findContracts(ctx context.Context) error {
 
 	// contract will update mu.targets if the provided comments contain
 	// a contract declaration. It will also extract contract aliases.
-	contract := func(pkg *packages.Package, comments []*ast.CommentGroup, node ast.Node, typ ast.Expr) {
+	contract := func(
+		pkg *packages.Package,
+		comments []*ast.CommentGroup,
+		node ast.Node,
+		typ ast.Expr,
+		kind targetKind,
+	) {
 		for _, group := range comments {
 			for _, comment := range group.List {
 				matches := commentSyntax.FindAllStringSubmatch(comment.Text, -1)
@@ -272,6 +278,7 @@ func (e *Enforcer) findContracts(ctx context.Context) error {
 					tgt := &target{
 						config:   strings.TrimSpace(match[2]),
 						contract: match[1],
+						kind:     kind,
 						node:     node,
 						pkg:      pkg,
 						pos:      comment.Pos(),
@@ -301,6 +308,9 @@ func (e *Enforcer) findContracts(ctx context.Context) error {
 		// its surrounding comments.
 		comments := ast.NewCommentMap(pkg.Fset, file, file.Comments)
 
+		// Track current-X's in the visitation below.
+		var curType types.Type
+
 		// Now we'll inspect the ast.File and look for our magic
 		// comment syntax.
 		ast.Inspect(file, func(node ast.Node) bool {
@@ -311,11 +321,12 @@ func (e *Enforcer) findContracts(ctx context.Context) error {
 
 			switch t := node.(type) {
 			case *ast.Field:
-				// Fields of a function type, such as
-				//   type I interface { func Blah() }
-				//   type S struct { Blah func() }
-				if funcType, ok := t.Type.(*ast.FuncType); ok {
-					contract(pkg, comments[t], t, funcType)
+				// Methods of an interface type, such as
+				//   type I interface { Foo() }
+				if _, ok := curType.(*types.Interface); ok {
+					if funcType, ok := t.Type.(*ast.FuncType); ok {
+						contract(pkg, comments[t], t, funcType, kindInterfaceMethod)
+					}
 				}
 				return false
 
@@ -323,7 +334,11 @@ func (e *Enforcer) findContracts(ctx context.Context) error {
 				// Top-level function or method declarations, such as
 				//   func Foo() { .... }
 				//   func (r Receiver) Bar() { ... }
-				contract(pkg, comments[t], t, t.Type)
+				kind := kindFunction
+				if t.Recv != nil {
+					kind = kindMethod
+				}
+				contract(pkg, comments[t], t, t.Type, kind)
 				// We don't need to descend into function bodies.
 				return false
 
@@ -335,16 +350,20 @@ func (e *Enforcer) findContracts(ctx context.Context) error {
 					//   type Bar interface { ... }
 					for _, spec := range t.Specs {
 						tSpec := spec.(*ast.TypeSpec)
+						curType = pkg.TypesInfo.TypeOf(tSpec.Type)
+						kind := kindType
+						if _, ok := tSpec.Type.(*ast.InterfaceType); ok {
+							kind = kindInterface
+						}
 						// Handle the usual case where contract is associated
 						// with the type keyword.
-						contract(pkg, comments[t], tSpec, tSpec.Name)
+						contract(pkg, comments[t], tSpec, tSpec.Name, kind)
 						// Handle unusual case where a type() block is being used
 						// and a contract is specified on the entry.
-						contract(pkg, comments[tSpec], tSpec, tSpec.Name)
+						contract(pkg, comments[tSpec], tSpec, tSpec.Name, kind)
 						// We do need to descend into interfaces to pick up on
 						// contracts applied only to interface methods.
-						_, ok := tSpec.Type.(*ast.InterfaceType)
-						return ok
+						return kind == kindInterface
 					}
 
 				case token.VAR:

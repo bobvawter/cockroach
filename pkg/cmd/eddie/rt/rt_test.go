@@ -45,6 +45,19 @@ func Test(t *testing.T) {
 	a.Len(e.aliases, 1)
 	a.Len(e.assertions, 4)
 	a.Len(e.targets, 7)
+
+	// Check the target kinds.
+	seenKinds := make(map[targetKind]int)
+	for _, tgt := range e.targets {
+		seenKinds[tgt.kind]++
+	}
+	a.Equal(map[targetKind]int{
+		kindMethod:          1,
+		kindFunction:        1,
+		kindInterface:       1,
+		kindInterfaceMethod: 2,
+		kindType:            2,
+	}, seenKinds)
 }
 
 type CanGoHere struct{}
