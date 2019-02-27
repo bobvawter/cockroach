@@ -18,11 +18,9 @@ package rt
 
 import (
 	"fmt"
-	"go/ast"
 	"go/token"
 	"go/types"
 	"path/filepath"
-	"reflect"
 	"regexp"
 	"sort"
 
@@ -44,47 +42,33 @@ var commentSyntax = regexp.MustCompile(
 //                Configuration data, non-greedy match ^
 //                              Ignore closing block comment ^
 
-//go:generate stringer -type targetKind -trimprefix kind
+// TODO(bob): Allow contracts to be bound to functions where a type
+// is in scope.  For instance, we might want to examine all uses
+// of where a context.Context is in scope to look for select{}
+// constructs that don't check the Done() channel.
 
-// targetKind
-type targetKind int
+// TODO(bob): Allow contracts to be bound to packages (and sub-packages).
 
-const (
-	// A method declaration like:
-	//   func (r Receiver) Foo() { ... }
-	kindMethod targetKind = iota + 1
-	// A top-level function declaration:
-	//   func Foo () { .... }
-	kindFunction
-	//
-	kindInterface
-	// A method defined in an interface:
-	//   type I interface { Foo() }
-	kindInterfaceMethod
-	// All types other than interface declarations.
-	kindType
-)
-
-// A target describes a binding between a contract and a specific
+// A target describes a binding between a contract and a named object.
 type target struct {
 	// The raw JSON configuration string, extracted from the doc comment.
 	config string
 	// The name of the contract, which could be an alias.
 	contract string
+	// The object which encloses object, if any.
+	enclosing types.Object
+	// Underlying source data, for position lookups.
+	fset *token.FileSet
 	// Populated by Enforcer.expandAll() and contains a ready-to-run
 	// Contract instance.
 	impl ext.Contract
 	// Memoizes the behavior to apply to the target.
-	kind targetKind
-	// The node on which the contract is bound.
-	node ast.Node
-	// The package in which the contract is bound.
-	pkg *packages.Package
+	kind ext.Kind
+	// The object on which the contract is bound,
+	// a type, field, method, or function.
+	object types.Object
 	// The position of the binding comment.
 	pos token.Pos
-	// The type on which the contract has been placed, usually a
-	// *types.Named.
-	typ types.Type
 }
 
 // Pos implement the Located interface.
@@ -94,37 +78,22 @@ func (t *target) Pos() token.Pos {
 
 // String is for debugging use only.
 func (t *target) String() string {
-	pos := t.pkg.Fset.Position(t.Pos())
-	var thing string
-	switch n := t.node.(type) {
-	case *ast.Field:
-		thing = n.Names[0].Name
-	case *ast.FuncDecl:
-		thing = n.Name.String()
-	case *ast.Package:
-		thing = n.Name
-	case *ast.TypeSpec:
-		thing = n.Name.String()
-	default:
-		thing = reflect.TypeOf(n).String()
-	}
+	pos := t.fset.Position(t.Pos())
 	return fmt.Sprintf("%s:%d:%d %s %s := %s %s",
 		filepath.Base(pos.Filename), pos.Line, pos.Column,
-		t.kind, thing, t.contract, t.config)
+		t.kind, t.object.Name(), t.contract, t.config)
 }
 
 // An assertion represents a top-level declaration of the forms
 //   var _ SomeInterface = SomeStruct{}
 //   var _ SomeInterface = &SomeStruct{}
 type assertion struct {
+	fset *token.FileSet
 	// A named interface type.
-	intf *types.Named
-	pkg  *packages.Package
+	intf types.Object
+	// The implementing type.
+	impl types.Object
 	pos  token.Pos
-	// Indicates that the interface is implemented using pointer receivers.
-	ptr bool
-	// A named struct type.
-	str *types.Named
 }
 
 // Pos implements the Located interface.
@@ -134,14 +103,10 @@ func (a *assertion) Pos() token.Pos {
 
 // String is for debugging use only.
 func (a *assertion) String() string {
-	pos := a.pkg.Fset.Position(a.Pos())
-	ptr := ""
-	if a.ptr {
-		ptr = "&"
-	}
-	return fmt.Sprintf("%s:%d:%d: var _ %s = %s%s{}",
+	pos := a.fset.Position(a.Pos())
+	return fmt.Sprintf("%s:%d:%d: var _ %s = %s{}",
 		filepath.Base(pos.Filename), pos.Line, pos.Column,
-		a.intf.Obj().Id(), ptr, a.str.Obj().Id())
+		a.intf.Id(), a.impl.Id())
 }
 
 // These slice types will sort based on their element's token.Pos.

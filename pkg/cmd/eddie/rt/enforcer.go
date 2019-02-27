@@ -110,9 +110,94 @@ func (e *Enforcer) Main() {
 	os.Exit(0)
 }
 
-// enforce performs enforcement on a single target.
-func (e *Enforcer) enforce(tgt *target) error {
-	panic("unimplemented")
+// enforce performs enforcement on a single target. This method
+// resolves the target into the various objects that we want to
+// pass into the contract implementation and then invokes the
+// contract for validation.
+func (e *Enforcer) enforce(ctx context.Context, tgt *target) error {
+	assertions := make(ext.Assertions, len(e.assertions))
+	for _, a := range e.assertions {
+		assertions[a.intf] = append(assertions[a.intf], a.impl)
+	}
+	impl := &contextImpl{
+		Context:  ctx,
+		contract: tgt.contract,
+		kind:     tgt.kind,
+		name:     tgt.object.Name(),
+		reports:  make(map[token.Pos][]string),
+		oracle:   ext.NewOracle(e.ssaPgm, assertions),
+	}
+
+	switch tgt.kind {
+	case ext.KindInterface:
+		decl := e.ssaPgm.Package(tgt.object.Pkg()).Type(tgt.object.Name())
+		impl.declaration = decl
+		for _, obj := range impl.Oracle().TypeImplementors(decl.Type().Underlying().(*types.Interface), true) {
+			impl.objects = append(impl.objects, e.ssaPgm.Package(obj.Pkg()).Type(obj.Name()))
+		}
+
+	case ext.KindInterfaceMethod:
+		intf := tgt.enclosing.Type().Underlying().(*types.Interface)
+		impl.declaration = e.ssaPgm.Package(tgt.enclosing.Pkg()).Type(tgt.enclosing.Name())
+		for _, i := range impl.Oracle().MethodImplementors(intf, tgt.object.Name(), true) {
+			impl.objects = append(impl.objects, i)
+		}
+
+	case ext.KindFunction, ext.KindMethod:
+		fn := tgt.object.(*types.Func)
+		impl.declaration = e.ssaPgm.FuncValue(fn)
+
+	case ext.KindType:
+		impl.declaration = e.ssaPgm.Package(tgt.object.Pkg()).Type(tgt.object.Name())
+
+	default:
+		panic(errors.Errorf("unimplemented: %s", tgt.kind))
+	}
+
+	// Ensure that the relevant packages have been built.  Per the docs,
+	// calling Build() is idempotent.
+	impl.declaration.Package().Build()
+	for _, obj := range impl.objects {
+		obj.Package().Build()
+	}
+	tgt.impl.Enforce(impl)
+	return nil
+}
+
+// enforceAll executes all targets.
+func (e *Enforcer) enforceAll(ctx context.Context) error {
+	g, ctx := errgroup.WithContext(ctx)
+	ch := make(chan *target, 1)
+
+	for i := 0; i < runtime.NumCPU(); i++ {
+		g.Go(func() error {
+			for {
+				select {
+				case tgt, open := <-ch:
+					if !open {
+						return nil
+					}
+					if err := e.enforce(ctx, tgt); err != nil {
+						return err
+					}
+				case <-ctx.Done():
+					return ctx.Err()
+				}
+			}
+		})
+	}
+
+sendLoop:
+	for _, tgt := range e.targets {
+		select {
+		case ch <- tgt:
+		case <-ctx.Done():
+			break sendLoop
+		}
+	}
+	close(ch)
+
+	return g.Wait()
 }
 
 // execute is used by tests.
@@ -185,7 +270,7 @@ func (e *Enforcer) expand(base *target) ([]*target, error) {
 		for _, alias := range work {
 			if seen[alias] {
 				return nil, errors.Errorf("%s detected recursive contract %q",
-					base.pkg.Fset.Position(base.Pos()), alias.contract)
+					base.fset.Position(base.Pos()), alias.contract)
 			}
 			seen[alias] = true
 			if moreExpansions := e.aliases[alias.contract]; moreExpansions != nil {
@@ -220,7 +305,7 @@ func (e *Enforcer) expandAll(ctx context.Context) error {
 		provider := e.Contracts[tgt.contract]
 		if provider == nil {
 			return errors.Errorf("%s: cannot find contract named %s",
-				tgt.pkg.Fset.Position(tgt.Pos()), tgt.contract)
+				tgt.fset.Position(tgt.Pos()), tgt.contract)
 		}
 		tgt.impl = provider()
 		if tgt.config != "" {
@@ -228,7 +313,7 @@ func (e *Enforcer) expandAll(ctx context.Context) error {
 			d := json.NewDecoder(strings.NewReader(tgt.config))
 			d.DisallowUnknownFields()
 			if err := d.Decode(&tgt.impl); err != nil {
-				return errors.Wrap(err, tgt.pkg.Fset.Position(tgt.Pos()).String())
+				return errors.Wrap(err, tgt.fset.Position(tgt.Pos()).String())
 			}
 		}
 	}
@@ -267,22 +352,22 @@ func (e *Enforcer) findContracts(ctx context.Context) error {
 	contract := func(
 		pkg *packages.Package,
 		comments []*ast.CommentGroup,
-		node ast.Node,
-		typ ast.Expr,
-		kind targetKind,
+		object types.Object,
+		enclosing types.Object,
+		kind ext.Kind,
 	) {
 		for _, group := range comments {
 			for _, comment := range group.List {
 				matches := commentSyntax.FindAllStringSubmatch(comment.Text, -1)
 				for _, match := range matches {
 					tgt := &target{
-						config:   strings.TrimSpace(match[2]),
-						contract: match[1],
-						kind:     kind,
-						node:     node,
-						pkg:      pkg,
-						pos:      comment.Pos(),
-						typ:      pkg.TypesInfo.TypeOf(typ),
+						config:    strings.TrimSpace(match[2]),
+						contract:  match[1],
+						enclosing: enclosing,
+						fset:      pkg.Fset,
+						kind:      kind,
+						object:    object,
+						pos:       comment.Pos(),
 					}
 
 					e.println("target", tgt)
@@ -290,7 +375,7 @@ func (e *Enforcer) findContracts(ctx context.Context) error {
 					// Special case for contract aliases of the form
 					//   //contract:Foo { ... }
 					//   type Alias ext.Contract
-					if named, ok := tgt.typ.(*types.Named); ok && tgt.typ.Underlying() == e.contractType {
+					if named, ok := tgt.object.Type().(*types.Named); ok && named.Underlying() == e.contractType {
 						name := named.Obj().Name()
 						e.println("alias", name, ":=", tgt)
 						mu.aliases[name] = append(mu.aliases[name], tgt)
@@ -309,7 +394,7 @@ func (e *Enforcer) findContracts(ctx context.Context) error {
 		comments := ast.NewCommentMap(pkg.Fset, file, file.Comments)
 
 		// Track current-X's in the visitation below.
-		var curType types.Type
+		var enclosing types.Object
 
 		// Now we'll inspect the ast.File and look for our magic
 		// comment syntax.
@@ -323,9 +408,10 @@ func (e *Enforcer) findContracts(ctx context.Context) error {
 			case *ast.Field:
 				// Methods of an interface type, such as
 				//   type I interface { Foo() }
-				if _, ok := curType.(*types.Interface); ok {
-					if funcType, ok := t.Type.(*ast.FuncType); ok {
-						contract(pkg, comments[t], t, funcType, kindInterfaceMethod)
+				// surface as fields with a function type.
+				if types.IsInterface(enclosing.Type()) {
+					if _, ok := t.Type.(*ast.FuncType); ok {
+						contract(pkg, comments[t], pkg.TypesInfo.ObjectOf(t.Names[0]), enclosing, ext.KindInterfaceMethod)
 					}
 				}
 				return false
@@ -334,11 +420,11 @@ func (e *Enforcer) findContracts(ctx context.Context) error {
 				// Top-level function or method declarations, such as
 				//   func Foo() { .... }
 				//   func (r Receiver) Bar() { ... }
-				kind := kindFunction
+				kind := ext.KindFunction
 				if t.Recv != nil {
-					kind = kindMethod
+					kind = ext.KindMethod
 				}
-				contract(pkg, comments[t], t, t.Type, kind)
+				contract(pkg, comments[t], pkg.TypesInfo.ObjectOf(t.Name), nil, kind)
 				// We don't need to descend into function bodies.
 				return false
 
@@ -350,20 +436,21 @@ func (e *Enforcer) findContracts(ctx context.Context) error {
 					//   type Bar interface { ... }
 					for _, spec := range t.Specs {
 						tSpec := spec.(*ast.TypeSpec)
-						curType = pkg.TypesInfo.TypeOf(tSpec.Type)
-						kind := kindType
+						enclosing = pkg.TypesInfo.ObjectOf(tSpec.Name)
+						kind := ext.KindType
 						if _, ok := tSpec.Type.(*ast.InterfaceType); ok {
-							kind = kindInterface
+							kind = ext.KindInterface
 						}
+
 						// Handle the usual case where contract is associated
 						// with the type keyword.
-						contract(pkg, comments[t], tSpec, tSpec.Name, kind)
+						contract(pkg, comments[t], enclosing, nil, kind)
 						// Handle unusual case where a type() block is being used
 						// and a contract is specified on the entry.
-						contract(pkg, comments[tSpec], tSpec, tSpec.Name, kind)
+						contract(pkg, comments[tSpec], enclosing, nil, kind)
 						// We do need to descend into interfaces to pick up on
 						// contracts applied only to interface methods.
-						return kind == kindInterface
+						return kind == ext.KindInterface
 					}
 
 				case token.VAR:
@@ -373,26 +460,29 @@ func (e *Enforcer) findContracts(ctx context.Context) error {
 					for _, spec := range t.Specs {
 						v := spec.(*ast.ValueSpec)
 						if len(v.Values) == 1 && v.Names[0].Name == "_" {
-							if named, ok := pkg.TypesInfo.TypeOf(v.Type).(*types.Named); ok {
-								if intf, ok := named.Underlying().(*types.Interface); ok {
-									a := assertion{intf: named, pkg: pkg, pos: v.Pos()}
-									switch v := pkg.TypesInfo.TypeOf(v.Values[0]).(type) {
-									case *types.Named:
-										if _, ok := v.Underlying().(*types.Struct); ok {
-											a.str = v
-										}
-									case *types.Pointer:
-										if named, ok := v.Elem().(*types.Named); ok {
-											if _, ok := named.Underlying().(*types.Struct); ok {
-												a.str = named
-											}
-										}
-									}
-									if a.str != nil {
-										a.ptr = !types.Implements(a.str, intf)
-										addAssertion(&a)
+							named, ok := pkg.TypesInfo.TypeOf(v.Type).(*types.Named)
+							if !ok || !types.IsInterface(named) {
+								continue
+							}
+							a := &assertion{
+								intf: named.Obj(),
+								fset: e.ssaPgm.Fset,
+								pos:  v.Pos(),
+							}
+							switch v := pkg.TypesInfo.TypeOf(v.Values[0]).(type) {
+							case *types.Named:
+								if _, ok := v.Underlying().(*types.Struct); ok {
+									a.impl = v.Obj()
+								}
+							case *types.Pointer:
+								if named, ok := v.Elem().(*types.Named); ok {
+									if _, ok := named.Underlying().(*types.Struct); ok {
+										a.impl = named.Obj()
 									}
 								}
+							}
+							if a.impl != nil {
+								addAssertion(a)
 							}
 						}
 					}

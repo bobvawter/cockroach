@@ -25,25 +25,35 @@ import (
 
 type contextImpl struct {
 	context.Context
+	contract    string
 	declaration ssa.Member
-	reports     map[token.Pos][]string
+	kind        ext.Kind
+	name        string
 	objects     []ssa.Member
+	oracle      *ext.TypeOracle
 	program     *ssa.Program
+	reports     map[token.Pos][]string
 }
 
 var _ ext.Context = &contextImpl{}
 
-func newContext() *contextImpl {
-	return &contextImpl{
-		reports: make(map[token.Pos][]string),
-	}
-}
+// Contract implements ext.Context.
+func (c *contextImpl) Contract() string { return c.contract }
 
 // Declarations implements ext.Context.
 func (c *contextImpl) Declaration() ssa.Member { return c.declaration }
 
+// Kind implements ext.Context.
+func (c *contextImpl) Kind() ext.Kind { return c.kind }
+
+// Name implements ext.Context.
+func (c *contextImpl) Name() string { return c.name }
+
 // Objects implements ext.Context.
 func (c *contextImpl) Objects() []ssa.Member { return c.objects }
+
+// Oracle implements ext.Context.
+func (c *contextImpl) Oracle() *ext.TypeOracle { return c.oracle }
 
 // Program implements ext.Context.
 func (c *contextImpl) Program() *ssa.Program { return c.program }
