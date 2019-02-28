@@ -12,16 +12,46 @@
 // implied. See the License for the specific language governing
 // permissions and limitations under the License.
 
-package main_test
+package retlint
 
 import (
+	"context"
+	"log"
+	"os"
 	"path/filepath"
 	"sort"
 	"testing"
 
-	retlint "github.com/cockroachdb/cockroach/pkg/cmd/retlint"
+	"github.com/cockroachdb/cockroach/pkg/cmd/eddie/ext"
+	"github.com/cockroachdb/cockroach/pkg/cmd/eddie/rt"
+	"github.com/cockroachdb/cockroach/pkg/util/syncutil"
 	"github.com/stretchr/testify/assert"
 )
+
+type aggregator struct {
+	fakePkgName string
+	mu          struct {
+		syncutil.Mutex
+		dirty []DirtyFunction
+	}
+}
+
+func (a *aggregator) Enforce(ctx ext.Context) error {
+	linter := &RetLint{
+		AllowedNames: []string{
+			"_" + a.fakePkgName + "/GoodPtrError",
+			"_" + a.fakePkgName + "/GoodValError",
+		},
+		TargetName: "error",
+	}
+	err := linter.Enforce(ctx)
+	a.mu.Lock()
+	a.mu.dirty = append(a.mu.dirty, linter.reported...)
+	a.mu.Unlock()
+	return err
+}
+
+var _ ext.Contract = &aggregator{}
 
 func Test(t *testing.T) {
 	a := assert.New(t)
@@ -30,20 +60,23 @@ func Test(t *testing.T) {
 		return
 	}
 
-	l := retlint.RetLint{
-		AllowedNames: []string{
-			"_" + fakePkgName + "/GoodPtrError",
-			"_" + fakePkgName + "/GoodValError",
+	aggregator := &aggregator{fakePkgName: fakePkgName}
+
+	e := rt.Enforcer{
+		Contracts: map[string]func() ext.Contract{
+			"retlint": func() ext.Contract { return aggregator },
 		},
-		Dir:        fakePkgName,
-		Packages:   []string{"."},
-		TargetName: "error",
+		Dir:      fakePkgName,
+		Logger:   log.New(os.Stdout, "", 0),
+		Name:     "test",
+		Packages: []string{"."},
 	}
 
-	dirty, err := l.Execute()
+	_, err = e.Execute(context.Background())
 	if !a.NoError(err) {
 		return
 	}
+	//	a.Len(reports, 1)
 
 	tcs := []struct {
 		name      string
@@ -64,6 +97,7 @@ func Test(t *testing.T) {
 		{name: "UsesSelfBad", whyLength: 2},
 	}
 
+	dirty := aggregator.mu.dirty
 	t.Run("good extraction", func(t *testing.T) {
 		a := assert.New(t)
 		tcNames := make([]string, len(tcs))
@@ -91,28 +125,5 @@ func Test(t *testing.T) {
 			}
 			a.Fail("did not find function", tc.name)
 		})
-	}
-}
-
-func Benchmark(b *testing.B) {
-	fakePkgName, err := filepath.Abs("./testdata")
-	if err != nil {
-		b.Fatal(err)
-	}
-	for i := 0; i < b.N; i++ {
-
-		l := retlint.RetLint{
-			AllowedNames: []string{
-				"_" + fakePkgName + "/GoodPtrError",
-				"_" + fakePkgName + "/GoodValError",
-			},
-			Dir:        fakePkgName,
-			Packages:   []string{"."},
-			TargetName: "error",
-		}
-
-		if _, err := l.Execute(); err != nil {
-			b.Fatal(err)
-		}
 	}
 }

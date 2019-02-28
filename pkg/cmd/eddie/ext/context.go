@@ -58,7 +58,8 @@ type Context interface {
 // A Contract implements some correctness-checking logic.
 type Contract interface {
 	// Enforce will be called on an instance of the Contract automatically
-	// by the runtime.
+	// by the runtime. Any error returned by this method will be reported
+	// against the declaration object.
 	Enforce(ctx Context) error
 }
 

@@ -71,6 +71,62 @@ type Enforcer struct {
 	targets      []*target
 }
 
+// Execute allows an Enforcer to be called programmatically.
+func (e *Enforcer) Execute(ctx context.Context) (Results, error) {
+	// Load the source
+	cfg := &packages.Config{
+		Dir:   e.Dir,
+		Fset:  token.NewFileSet(),
+		Mode:  packages.LoadAllSyntax,
+		Tests: e.Tests,
+	}
+	pkgs, err := packages.Load(cfg, e.Packages...)
+	if err != nil {
+		return nil, err
+	}
+	e.pkgs = pkgs
+
+	e.allPackages = flattenImports(pkgs)
+
+	// If the user has imported the ext package, they may have declared
+	// contract aliases.  We'll need to find the underlying interface type.
+	if extPkg := e.allPackages["github.com/cockroachdb/cockroach/pkg/cmd/eddie/ext"]; extPkg != nil {
+		if obj := extPkg.Types.Scope().Lookup("Contract"); obj != nil {
+			e.contractType = obj.Type().Underlying().(*types.Interface)
+		}
+	}
+
+	// Prep SSA program. We'll defer building the packages until we
+	// need to present a function to a Contract.
+	e.ssaPgm, _ = ssautil.AllPackages(pkgs, 0 /* mode */)
+	e.ssaPgm.Build()
+
+	// Look for contract declarations on the AST side before we go through
+	// the bother of converting to SSA form
+	if err := e.findContracts(ctx); err != nil {
+		return nil, err
+	}
+
+	// Expand aliases and initialize Contract instances.
+	if err := e.expandAll(ctx); err != nil {
+		return nil, err
+	}
+
+	e.reports = make(chan report)
+	ret := make(Results)
+	go func() {
+		for r := range e.reports {
+			pos := cfg.Fset.Position(r.pos)
+			ret[pos] = append(ret[pos], r.info)
+		}
+	}()
+
+	// Now, we can run the contracts.
+	err = e.enforceAll(ctx)
+	close(e.reports)
+	return ret, err
+}
+
 // Main is called by the generated main() code.
 func (e *Enforcer) Main() {
 	root := cobra.Command{
@@ -140,6 +196,7 @@ func (e *Enforcer) enforce(ctx context.Context, tgt *target) error {
 		contract: tgt.contract,
 		kind:     tgt.kind,
 		oracle:   ext.NewOracle(e.ssaPgm, assertions),
+		program:  e.ssaPgm,
 		reports:  e.reports,
 	}
 
@@ -169,12 +226,6 @@ func (e *Enforcer) enforce(ctx context.Context, tgt *target) error {
 		panic(errors.Errorf("unimplemented: %s", tgt.kind))
 	}
 
-	// Ensure that the relevant packages have been built.  Per the docs,
-	// calling Build() is idempotent.
-	impl.declaration.Package().Build()
-	for _, obj := range impl.objects {
-		obj.Package().Build()
-	}
 	return tgt.impl.Enforce(impl)
 }
 
@@ -202,9 +253,12 @@ func (e *Enforcer) enforceAll(ctx context.Context) error {
 	}
 
 sendLoop:
-	for _, tgt := range e.targets {
+	for i, tgt := range e.targets {
 		select {
 		case ch <- tgt:
+			// Nullify the reference to the target once dispatched to
+			// allow completed targets to be garbage-collected.
+			e.targets[i] = nil
 		case <-ctx.Done():
 			break sendLoop
 		}
@@ -212,61 +266,6 @@ sendLoop:
 	close(ch)
 
 	return g.Wait()
-}
-
-// Execute allows an Enforcer to be called programmatically.
-func (e *Enforcer) Execute(ctx context.Context) (Results, error) {
-	// Load the source
-	cfg := &packages.Config{
-		Dir:   e.Dir,
-		Fset:  token.NewFileSet(),
-		Mode:  packages.LoadAllSyntax,
-		Tests: e.Tests,
-	}
-	pkgs, err := packages.Load(cfg, e.Packages...)
-	if err != nil {
-		return nil, err
-	}
-	e.pkgs = pkgs
-
-	e.allPackages = flattenImports(pkgs)
-
-	// If the user has imported the ext package, they may have declared
-	// contract aliases.  We'll need to find the underlying interface type.
-	if extPkg := e.allPackages["github.com/cockroachdb/cockroach/pkg/cmd/eddie/ext"]; extPkg != nil {
-		if obj := extPkg.Types.Scope().Lookup("Contract"); obj != nil {
-			e.contractType = obj.Type().Underlying().(*types.Interface)
-		}
-	}
-
-	// Prep SSA program. We'll defer building the packages until we
-	// need to present a function to a Contract.
-	e.ssaPgm, _ = ssautil.AllPackages(pkgs, 0 /* mode */)
-
-	// Look for contract declarations on the AST side before we go through
-	// the bother of converting to SSA form
-	if err := e.findContracts(ctx); err != nil {
-		return nil, err
-	}
-
-	// Expand aliases and initialize Contract instances.
-	if err := e.expandAll(ctx); err != nil {
-		return nil, err
-	}
-
-	e.reports = make(chan report)
-	ret := make(Results)
-	go func() {
-		for r := range e.reports {
-			pos := cfg.Fset.Position(r.pos)
-			ret[pos] = append(ret[pos], r.info)
-		}
-	}()
-
-	// Now, we can run the contracts.
-	err = e.enforceAll(ctx)
-	close(e.reports)
-	return ret, err
 }
 
 // expand expands alias targets into their final form or returns
@@ -548,7 +547,7 @@ sendLoop:
 			continue
 		}
 		if pkg.Errors != nil {
-			continue
+			return errors.Wrap(pkg.Errors[0], "could not load source due to error(s)")
 		}
 
 		for _, file := range pkg.Syntax {

@@ -12,7 +12,7 @@
 // implied. See the License for the specific language governing
 // permissions and limitations under the License.
 
-package main
+package retlint
 
 import (
 	"fmt"
@@ -22,10 +22,9 @@ import (
 	"path"
 	"strings"
 
+	"github.com/cockroachdb/cockroach/pkg/cmd/eddie/ext"
 	"github.com/pkg/errors"
-	"golang.org/x/tools/go/packages"
 	"golang.org/x/tools/go/ssa"
-	"golang.org/x/tools/go/ssa/ssautil"
 )
 
 // DirtyFunction contains a function which did not pass the required
@@ -64,15 +63,13 @@ func because(value ssa.Value, reason string, args ...interface{}) []DirtyReason 
 type RetLint struct {
 	// The names of the allowed types.
 	AllowedNames []string
-	// Override the current working directory.
-	Dir string
-	// The names of the packages whose exported functions will be
-	Packages []string
 	// The name of the target interface.
 	TargetName string
 
 	// The acceptable types which implement the target interface.
 	allowed map[*types.Named]bool
+	// Used by testing to verify the output.
+	reported []DirtyFunction
 	// Accumulates information during the analysis.
 	stats map[*ssa.Function]*funcStat
 	// The interfaces that we trigger the behavior on.
@@ -82,72 +79,59 @@ type RetLint struct {
 	work []*funcStat
 }
 
-// Execute performs the analysis and returns the dirty functions which
-// match the configured predicate (if any).
-func (l *RetLint) Execute() ([]DirtyFunction, error) {
+var _ ext.Contract = &RetLint{}
+
+// Enforce implement the BigEddie Contract interface.
+func (l *RetLint) Enforce(ctx ext.Context) error {
 	if l.TargetName == "" {
-		return nil, errors.New("no target interface name set")
+		return errors.New("no target interface name set")
+	}
+	if l.AllowedNames == nil {
+		return errors.New("no allowed implementation names set")
 	}
 	l.allowed = make(map[*types.Named]bool)
 	l.stats = make(map[*ssa.Function]*funcStat)
 
-	cfg := &packages.Config{
-		Dir:  l.Dir,
-		Mode: packages.LoadAllSyntax,
-	}
-	pkgs, err := packages.Load(cfg, l.Packages...)
-	if err != nil {
-		return nil, err
-	}
-
-	pgm, sPkgs := ssautil.AllPackages(pkgs, 0 /* mode flags */)
-	pgm.Build()
-
+	pgm := ctx.Program()
 	// Resolve the configured type names.
 	if found, err := resolve(pgm, l.TargetName); err == nil {
 		l.target = found
 	} else {
-		return nil, err
+		return err
 	}
-
 	for _, allowed := range l.AllowedNames {
 		if found, err := resolve(pgm, allowed); err == nil {
 			l.allowed[found] = true
 		} else {
-			return nil, err
+			return err
 		}
 	}
 
-	// We want to create a set of the ssa.Packages that result from
-	// the user's package input pattern.  We'll use that below in order
-	// to filter the functions that we report on.
-	userConfiguredPackages := make(map[*ssa.Package]bool)
-
-	// Bootstrap the work to perform by looking at top-level declarations.
-	for _, pkg := range sPkgs {
-		userConfiguredPackages[pkg] = true
-		for _, m := range pkg.Members {
-			switch t := m.(type) {
-			case *ssa.Function:
-				// Top-level function declarations.
-				l.stat(t)
-			case *ssa.Type:
-				// Methods defined with value receivers.
-				methods := pgm.MethodSets.MethodSet(t.Type())
-				for i := 0; i < methods.Len(); i++ {
-					if fn := pgm.MethodValue(methods.At(i)); fn != nil {
-						l.stat(fn)
-					}
+	for _, m := range ctx.Objects() {
+		switch t := m.(type) {
+		case *ssa.Function:
+			// Top-level function declarations.
+			l.stat(t)
+		case *ssa.Type:
+			// Methods defined with value receivers.
+			methods := pgm.MethodSets.MethodSet(t.Type())
+			for i := 0; i < methods.Len(); i++ {
+				if fn := pgm.MethodValue(methods.At(i)); fn != nil {
+					l.stat(fn)
 				}
-				// Methods defined with pointer receivers.
-				methods = pgm.MethodSets.MethodSet(types.NewPointer(t.Type()))
-				for i := 0; i < methods.Len(); i++ {
-					if fn := pgm.MethodValue(methods.At(i)); fn != nil {
-						l.stat(fn)
-					}
+			}
+			// Methods defined with pointer receivers.
+			methods = pgm.MethodSets.MethodSet(types.NewPointer(t.Type()))
+			for i := 0; i < methods.Len(); i++ {
+				if fn := pgm.MethodValue(methods.At(i)); fn != nil {
+					l.stat(fn)
 				}
 			}
 		}
+	}
+	reportFilter := make(map[*ssa.Function]bool)
+	for _, initial := range l.work {
+		reportFilter[initial.fn] = true
 	}
 
 	// Loop until we haven't added any new functions.
@@ -155,7 +139,7 @@ func (l *RetLint) Execute() ([]DirtyFunction, error) {
 		work := l.work
 		l.work = nil
 		for _, stat := range work {
-			l.analyze(stat)
+			l.analyze(ctx, stat)
 		}
 	}
 
@@ -166,61 +150,21 @@ func (l *RetLint) Execute() ([]DirtyFunction, error) {
 		}
 	}
 
-	// Returns dirty functions declared in the input package(s).
-	var ret []DirtyFunction
+	// Only report dirty information for the input object(s).
 	for _, s := range l.stats {
-		if s.state == stateDirty && ast.IsExported(s.fn.Name()) && userConfiguredPackages[s.fn.Pkg] {
-			ret = append(ret, s)
+		if s.state == stateDirty && ast.IsExported(s.fn.Name()) && reportFilter[s.fn] {
+			l.reported = append(l.reported, s)
 		}
 	}
-	return ret, nil
-}
 
-// Report produces a human-readable description of why the various
-// functions are dirty.
-func (l *RetLint) Report(dirty []DirtyFunction) string {
-	reported := make(map[*ssa.Function]bool)
-	sb := &strings.Builder{}
+	l.report(ctx)
 
-	for _, stat := range dirty {
-		fn := stat.Fn()
-		if reported[fn] {
-			continue
-		}
-		reported[fn] = true
-
-		fset := fn.Prog.Fset
-		_, _ = fmt.Fprintf(sb, "%s: func %s",
-			fset.Position(fn.Pos()), fn.RelString(fn.Pkg.Pkg))
-
-		for _, reason := range stat.Why() {
-			_, _ = fmt.Fprintf(sb, "\n  %s: %s: %s",
-				fset.Position(reason.Value.Pos()),
-				reason.Reason,
-				reason.Value)
-
-			if call, ok := reason.Value.(*ssa.Call); ok {
-				if callee := call.Common().StaticCallee(); callee != nil {
-					// Short-circuit the report if we're calling a function
-					// which has already been reported.
-					if reported[callee] {
-						sb.WriteString(" (already reported)")
-						break
-					}
-					// Mark any reported-upon callee as already seen.
-					reported[callee] = true
-				}
-			}
-		}
-		sb.WriteString("\n")
-	}
-
-	return sb.String()
+	return nil
 }
 
 // analyze begins the analysis process for a function.  This function
 // is a no-op if it has already been called on the stat.
-func (l *RetLint) analyze(stat *funcStat) {
+func (l *RetLint) analyze(ctx ext.Context, stat *funcStat) {
 	if stat.state != stateUnknown {
 		return
 	}
@@ -240,7 +184,7 @@ func (l *RetLint) analyze(stat *funcStat) {
 	seen := make(map[ssa.Value]bool)
 	for _, ret := range stat.returns {
 		for _, idx := range stat.targetIndexes {
-			l.decide(stat, ret.Results[idx], seen)
+			l.decide(ctx, stat, ret.Results[idx], seen)
 
 			if stat.state != stateAnalyzing {
 				return
@@ -251,7 +195,7 @@ func (l *RetLint) analyze(stat *funcStat) {
 
 // decide will mark the given function as dirty if the type of the given
 // value is not statically-resolvable to one of the desired concrete types.
-func (l *RetLint) decide(stat *funcStat, val ssa.Value, seen map[ssa.Value]bool) {
+func (l *RetLint) decide(ctx ext.Context, stat *funcStat, val ssa.Value, seen map[ssa.Value]bool) {
 	if seen[val] {
 		return
 	}
@@ -273,12 +217,7 @@ func (l *RetLint) decide(stat *funcStat, val ssa.Value, seen map[ssa.Value]bool)
 			callees = append(callees, callee)
 		} else if recv := t.Call.Signature().Recv(); recv != nil {
 			intf := recv.Type().Underlying().(*types.Interface)
-			for _, typ := range stat.fn.Prog.RuntimeTypes() {
-				if types.Implements(typ, intf) {
-					callee = stat.fn.Prog.LookupMethod(typ, t.Common().Method.Pkg(), t.Common().Method.Name())
-					callees = append(callees, callee)
-				}
-			}
+			callees = append(callees, ctx.Oracle().MethodImplementors(intf, t.Common().Method.Name(), true)...)
 		}
 
 		if callees == nil {
@@ -286,7 +225,7 @@ func (l *RetLint) decide(stat *funcStat, val ssa.Value, seen map[ssa.Value]bool)
 		} else {
 			for _, callee := range callees {
 				next := l.stat(callee)
-				l.analyze(next)
+				l.analyze(ctx, next)
 				switch next.state {
 				case stateClean:
 				// Already proven to be clean, ignore.
@@ -312,12 +251,12 @@ func (l *RetLint) decide(stat *funcStat, val ssa.Value, seen map[ssa.Value]bool)
 	case *ssa.Extract:
 		// This is how a (comma,ok) expression or multiple-return call
 		// is unpacked.
-		l.decide(stat, t.Tuple, seen)
+		l.decide(ctx, stat, t.Tuple, seen)
 
 	case *ssa.MakeInterface:
 		// A value is being wrapped as an interface, often implicitly.
 		// SomeInterface(x)
-		l.decide(stat, t.X, seen)
+		l.decide(ctx, stat, t.X, seen)
 
 	case *ssa.Phi:
 		// A Phi ("phony") value represents the convergence of multiple
@@ -333,7 +272,7 @@ func (l *RetLint) decide(stat *funcStat, val ssa.Value, seen map[ssa.Value]bool)
 		// The SSA of the above might look something like:
 		//   Call(doSomethingWith, Phi(Call(someFunc), Call(otherFunc)))
 		for _, edge := range t.Edges {
-			l.decide(stat, edge, seen)
+			l.decide(ctx, stat, edge, seen)
 		}
 
 	case *ssa.TypeAssert:
@@ -347,7 +286,7 @@ func (l *RetLint) decide(stat *funcStat, val ssa.Value, seen map[ssa.Value]bool)
 		// A dereference operation, often implicit.
 		// x := *y
 		if t.Op == token.MUL {
-			l.decide(stat, t.X, seen)
+			l.decide(ctx, stat, t.X, seen)
 		}
 
 	default:
@@ -462,6 +401,46 @@ func resolve(pgm *ssa.Program, typeName string) (*types.Named, error) {
 		return named, nil
 	}
 	return nil, fmt.Errorf("%q was not a named type", tgtName)
+}
+
+// report produces a human-readable description of why the various
+// functions are dirty.
+func (l *RetLint) report(ctx ext.Context) {
+	reported := make(map[*ssa.Function]bool)
+
+	for _, stat := range l.reported {
+		fn := stat.Fn()
+		if reported[fn] {
+			continue
+		}
+		reported[fn] = true
+
+		sb := &strings.Builder{}
+		fset := fn.Prog.Fset
+		_, _ = fmt.Fprintf(sb, "%s: func %s",
+			fset.Position(fn.Pos()), fn.RelString(fn.Pkg.Pkg))
+
+		for _, reason := range stat.Why() {
+			_, _ = fmt.Fprintf(sb, "\n  %s: %s: %s",
+				fset.Position(reason.Value.Pos()),
+				reason.Reason,
+				reason.Value)
+
+			if call, ok := reason.Value.(*ssa.Call); ok {
+				if callee := call.Common().StaticCallee(); callee != nil {
+					// Short-circuit the report if we're calling a function
+					// which has already been reported.
+					if reported[callee] {
+						sb.WriteString(" (already reported)")
+						break
+					}
+					// Mark any reported-upon callee as already seen.
+					reported[callee] = true
+				}
+			}
+		}
+		ctx.Report(fn, sb.String())
+	}
 }
 
 // stat creates a memoized funcStat to hold extracted information about

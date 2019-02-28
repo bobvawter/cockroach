@@ -59,7 +59,12 @@ func (o *TypeOracle) MethodImplementors(
 	impls := o.TypeImplementors(intf, assertedOnly)
 	ret := make([]*ssa.Function, len(impls))
 	for i, impl := range impls {
-		ret[i] = o.pgm.LookupMethod(impl.Type(), impl.Pkg(), name)
+		// Try on the type directly
+		sel := o.pgm.MethodSets.MethodSet(impl.Type()).Lookup(impl.Pkg(), name)
+		if sel == nil {
+			sel = o.pgm.MethodSets.MethodSet(types.NewPointer(impl.Type())).Lookup(impl.Pkg(), name)
+		}
+		ret[i] = o.pgm.MethodValue(sel)
 	}
 	return ret
 }
