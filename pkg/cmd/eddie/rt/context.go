@@ -23,16 +23,20 @@ import (
 	"golang.org/x/tools/go/ssa"
 )
 
+type report struct {
+	info string
+	pos  token.Pos
+}
+
 type contextImpl struct {
 	context.Context
 	contract    string
 	declaration ssa.Member
 	kind        ext.Kind
-	name        string
 	objects     []ssa.Member
 	oracle      *ext.TypeOracle
 	program     *ssa.Program
-	reports     map[token.Pos][]string
+	reports     chan<- report
 }
 
 var _ ext.Context = &contextImpl{}
@@ -46,11 +50,13 @@ func (c *contextImpl) Declaration() ssa.Member { return c.declaration }
 // Kind implements ext.Context.
 func (c *contextImpl) Kind() ext.Kind { return c.kind }
 
-// Name implements ext.Context.
-func (c *contextImpl) Name() string { return c.name }
-
 // Objects implements ext.Context.
-func (c *contextImpl) Objects() []ssa.Member { return c.objects }
+func (c *contextImpl) Objects() []ssa.Member {
+	if o := c.objects; o != nil {
+		return o
+	}
+	return []ssa.Member{c.declaration}
+}
 
 // Oracle implements ext.Context.
 func (c *contextImpl) Oracle() *ext.TypeOracle { return c.oracle }
@@ -60,8 +66,7 @@ func (c *contextImpl) Program() *ssa.Program { return c.program }
 
 // Declarations implements ext.Context.
 func (c *contextImpl) Report(l ext.Located, msg string) {
-	pos := l.Pos()
-	c.reports[pos] = append(c.reports[pos], msg)
+	c.reports <- report{msg, l.Pos()}
 }
 
 // Reportf implements ext.Context.

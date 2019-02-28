@@ -39,6 +39,8 @@ import (
 	"golang.org/x/tools/go/ssa/ssautil"
 )
 
+type Results map[token.Position][]string
+
 // Enforcer is the main entrypoint for a generated linter binary.
 // The generated code will just configure an instance of Enforcer
 // and call its Main() method.
@@ -54,6 +56,8 @@ type Enforcer struct {
 	Logger *log.Logger
 	// The package-patterns to enforce contracts upon.
 	Packages []string
+	// If true, Main() will call os.Exit(1) if any reports are generated.
+	SetExitStatus bool
 	// If true, the test sources for the package will be included.
 	Tests bool
 
@@ -62,6 +66,7 @@ type Enforcer struct {
 	assertions   []*assertion
 	contractType *types.Interface
 	pkgs         []*packages.Package
+	reports      chan report
 	ssaPgm       *ssa.Program
 	targets      []*target
 }
@@ -88,9 +93,20 @@ func (e *Enforcer) Main() {
 				}
 			}()
 
-			return e.execute(ctx)
+			results, err := e.Execute(ctx)
+			for pos, msgs := range results {
+				for _, msg := range msgs {
+					cmd.Printf("%s: %s", pos, msg)
+				}
+			}
+			if err == nil && e.SetExitStatus {
+				err = errors.New("reports generated")
+			}
+			return err
 		},
 	}
+	root.Flags().BoolVar(&e.SetExitStatus, "set_exit_status",
+		false, "return a non-zero exit code if errors are reported")
 
 	root.AddCommand(
 		&cobra.Command{
@@ -113,7 +129,7 @@ func (e *Enforcer) Main() {
 // enforce performs enforcement on a single target. This method
 // resolves the target into the various objects that we want to
 // pass into the contract implementation and then invokes the
-// contract for validation.
+// contracts for validation.
 func (e *Enforcer) enforce(ctx context.Context, tgt *target) error {
 	assertions := make(ext.Assertions, len(e.assertions))
 	for _, a := range e.assertions {
@@ -123,9 +139,8 @@ func (e *Enforcer) enforce(ctx context.Context, tgt *target) error {
 		Context:  ctx,
 		contract: tgt.contract,
 		kind:     tgt.kind,
-		name:     tgt.object.Name(),
-		reports:  make(map[token.Pos][]string),
 		oracle:   ext.NewOracle(e.ssaPgm, assertions),
+		reports:  e.reports,
 	}
 
 	switch tgt.kind {
@@ -160,8 +175,7 @@ func (e *Enforcer) enforce(ctx context.Context, tgt *target) error {
 	for _, obj := range impl.objects {
 		obj.Package().Build()
 	}
-	tgt.impl.Enforce(impl)
-	return nil
+	return tgt.impl.Enforce(impl)
 }
 
 // enforceAll executes all targets.
@@ -200,8 +214,8 @@ sendLoop:
 	return g.Wait()
 }
 
-// execute is used by tests.
-func (e *Enforcer) execute(ctx context.Context) error {
+// Execute allows an Enforcer to be called programmatically.
+func (e *Enforcer) Execute(ctx context.Context) (Results, error) {
 	// Load the source
 	cfg := &packages.Config{
 		Dir:   e.Dir,
@@ -211,7 +225,7 @@ func (e *Enforcer) execute(ctx context.Context) error {
 	}
 	pkgs, err := packages.Load(cfg, e.Packages...)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	e.pkgs = pkgs
 
@@ -232,21 +246,27 @@ func (e *Enforcer) execute(ctx context.Context) error {
 	// Look for contract declarations on the AST side before we go through
 	// the bother of converting to SSA form
 	if err := e.findContracts(ctx); err != nil {
-		return err
+		return nil, err
 	}
 
 	// Expand aliases and initialize Contract instances.
 	if err := e.expandAll(ctx); err != nil {
-		return err
+		return nil, err
 	}
 
-	// Now that we have all of the targets established, we can start
-	// extracting the information that we'll need in order to populate the
-	// contract contexts.
+	e.reports = make(chan report)
+	ret := make(Results)
+	go func() {
+		for r := range e.reports {
+			pos := cfg.Fset.Position(r.pos)
+			ret[pos] = append(ret[pos], r.info)
+		}
+	}()
 
-	// - Want to build up the datastructures that make the next pass easier
-
-	return nil
+	// Now, we can run the contracts.
+	err = e.enforceAll(ctx)
+	close(e.reports)
+	return ret, err
 }
 
 // expand expands alias targets into their final form or returns
@@ -379,8 +399,9 @@ func (e *Enforcer) findContracts(ctx context.Context) error {
 						name := named.Obj().Name()
 						e.println("alias", name, ":=", tgt)
 						mu.aliases[name] = append(mu.aliases[name], tgt)
+					} else {
+						mu.targets = append(mu.targets, tgt)
 					}
-					mu.targets = append(mu.targets, tgt)
 					mu.Unlock()
 				}
 			}
@@ -524,6 +545,9 @@ sendLoop:
 	for _, pkg := range e.pkgs {
 		// See discussion on package.Config type for the naming scheme.
 		if e.Tests && !strings.HasSuffix(pkg.ID, ".test]") {
+			continue
+		}
+		if pkg.Errors != nil {
 			continue
 		}
 

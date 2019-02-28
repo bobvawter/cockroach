@@ -33,12 +33,12 @@ type MustReturnInt struct {
 
 // Enforce would be called twice in this example. Once for
 // (ShouldPass).ReturnOne() and again for (ShouldFail).ReturnOne().
-func (m MustReturnInt) Enforce(ctx ext.Context) {
+func (m MustReturnInt) Enforce(ctx ext.Context) error {
 	for _, obj := range ctx.Objects() {
 		fn, ok := obj.(*ssa.Function)
 		if !ok {
 			ctx.Report(obj, "is not a function")
-			return
+			return nil
 		}
 
 		for _, block := range fn.Blocks {
@@ -48,7 +48,7 @@ func (m MustReturnInt) Enforce(ctx ext.Context) {
 					res := t.Results
 					if len(res) != 1 {
 						ctx.Report(t, "exactly one return value is required")
-						return
+						return nil
 					}
 					if c, ok := res[0].(*ssa.Const); ok {
 						if constant.MakeInt64(m.Expected) != c.Value {
@@ -61,6 +61,7 @@ func (m MustReturnInt) Enforce(ctx ext.Context) {
 			}
 		}
 	}
+	return nil
 }
 
 // CanGoHere is a no-op Contract which exists for documentation
@@ -68,4 +69,4 @@ func (m MustReturnInt) Enforce(ctx ext.Context) {
 type CanGoHere struct{}
 
 // Enforce implements the Contract interface and is a no-op.
-func (*CanGoHere) Enforce(ctx ext.Context) {}
+func (*CanGoHere) Enforce(ctx ext.Context) error { return nil }

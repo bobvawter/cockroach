@@ -43,15 +43,17 @@ type recorder struct {
 	Expected int
 }
 
-func (r *recorder) Enforce(ctx ext.Context) {
-	key := checkKey{contract: ctx.Contract(), name: ctx.Name(), kind: ctx.Kind()}
+func (r *recorder) Enforce(ctx ext.Context) error {
+	key := checkKey{contract: ctx.Contract(), name: ctx.Declaration().Name(), kind: ctx.Kind()}
 	r.t.Run(fmt.Sprint(key), func(t *testing.T) {
 		a := assert.New(t)
 		fn := r.cases[key]
+		ctx.Report(ctx.Declaration(), "here")
 		if a.NotNilf(fn, "missing check %#v", key) {
 			fn(a, ctx, r)
 		}
 	})
+	return nil
 }
 
 // This test creates a statically-configured Enforcer using the demo package.
@@ -60,10 +62,28 @@ func Test(t *testing.T) {
 
 	// Test cases are selected by the values return from
 	// ext.Context.Contract(), Name(), and Kind().
+	//
+	// NB: Keep these entries in the order in which they appear in the
+	// demo source to improve readability.
 	tcs := cases{
 		{
 			contract: "CanGoHere",
-			name:     "ReturnOne",
+			name:     "ReturnsNumber",
+			kind:     ext.KindInterface,
+		}: func(a *assert.Assertions, ctx ext.Context, r *recorder) {
+			// We expect to thee the interface and the two implementing types.
+			a.IsType(&types.Interface{}, ctx.Declaration().(*ssa.Type).Type().Underlying())
+
+			// Verify that we see the two implementing types.
+			a.Len(ctx.Objects(), 2)
+			for _, obj := range ctx.Objects() {
+				a.Contains([]string{"ShouldPass", "ShouldFail"}, obj.Name())
+			}
+		},
+
+		{
+			contract: "CanGoHere",
+			name:     "ReturnsNumber",
 			kind:     ext.KindInterfaceMethod,
 		}: func(a *assert.Assertions, ctx ext.Context, _ *recorder) {
 			// Verify that we see the declaring interface.
@@ -80,11 +100,61 @@ func Test(t *testing.T) {
 
 		{
 			contract: "MustReturnInt",
-			name:     "ReturnOne",
+			name:     "ReturnsNumber",
 			kind:     ext.KindInterfaceMethod,
 		}: func(a *assert.Assertions, ctx ext.Context, r *recorder) {
 			// Verify that configuration actually happened; otherwise as above.
 			a.Equal(1, r.Expected)
+		},
+
+		{
+			contract: "CanGoHere",
+			name:     "ShouldPass",
+			kind:     ext.KindType,
+		}: func(a *assert.Assertions, ctx ext.Context, r *recorder) {
+			// We should only see the type.
+			a.IsType(&types.Struct{}, ctx.Declaration().(*ssa.Type).Type().Underlying())
+			if a.Len(ctx.Objects(), 1) {
+				a.Equal(ctx.Declaration(), ctx.Objects()[0])
+			}
+		},
+
+		{
+			contract: "CanGoHere",
+			name:     "ReturnOne",
+			kind:     ext.KindMethod,
+		}: func(a *assert.Assertions, ctx ext.Context, r *recorder) {
+			// We should only see the function.
+			a.IsType(&ssa.Function{}, ctx.Declaration())
+			if a.Len(ctx.Objects(), 1) {
+				a.Equal(ctx.Declaration(), ctx.Objects()[0])
+			}
+		},
+
+		// Verify multiple-contract alias expansion.
+		{
+			contract: "CanGoHere",
+			name:     "HasAlias",
+			kind:     ext.KindFunction,
+		}: func(a *assert.Assertions, ctx ext.Context, r *recorder) {
+			// We should only see the function.
+			a.IsType(&ssa.Function{}, ctx.Declaration())
+			if a.Len(ctx.Objects(), 1) {
+				a.Equal(ctx.Declaration(), ctx.Objects()[0])
+			}
+		},
+
+		{
+			contract: "MustReturnInt",
+			name:     "HasAlias",
+			kind:     ext.KindFunction,
+		}: func(a *assert.Assertions, ctx ext.Context, r *recorder) {
+			// We should only see the function.
+			a.IsType(&ssa.Function{}, ctx.Declaration())
+			a.Equal(2, r.Expected)
+			if a.Len(ctx.Objects(), 1) {
+				a.Equal(ctx.Declaration(), ctx.Objects()[0])
+			}
 		},
 	}
 
@@ -101,28 +171,15 @@ func Test(t *testing.T) {
 		Tests:    true,
 	}
 
-	if !a.NoError(e.execute(context.Background())) {
-		return
-	}
-
+	res, err := e.Execute(context.Background())
+	a.NoError(err)
 	a.Len(e.aliases, 1)
 	a.Len(e.assertions, 4)
 	a.Equal(len(e.targets), len(tcs), "target / test-case mismatch")
 
-	// Call our recording contracts.
-	a.NoError(e.enforceAll(context.Background()))
-
-	// Check the target kinds.
-	//seenKinds := make(map[ext.Kind]int)
-	//for _, ctx := range seen {
-	//	seenKinds[ctx.Kind()]++
-	//}
-	//
-	//a.Equal(map[ext.Kind]int{
-	//	ext.KindMethod:          1,
-	//	ext.KindFunction:        1,
-	//	ext.KindInterface:       1,
-	//	ext.KindInterfaceMethod: 2,
-	//	ext.KindType:            2,
-	//}, seenKinds)
+	reports := 0
+	for _, msgs := range res {
+		reports += len(msgs)
+	}
+	a.Equal(len(tcs), reports)
 }

@@ -56,6 +56,7 @@ func (ShouldFail) ReturnOne() int {
 }
 
 //contract:CanGoHere
+//contract:MustReturnInt { "Expected" : 2 }
 type AnAlias ext.Contract
 
 //contract:AnAlias

@@ -37,10 +37,10 @@ type Context interface {
 	Declaration() ssa.Member
 	// Kind returns the kind of contract to be enforced.
 	Kind() Kind
-	Name() string
 	// Objects returns a collection of objects that a specific contract
-	// declaration maps to. See additional discussion on the Contract
-	// type.
+	// declaration maps to. In general, this will contain at least one
+	// element, the value returned from Declaration(). See additional
+	// discussion on the Kind type.
 	Objects() []ssa.Member
 	// Oracle returns a reference to a shared TypeOracle for answering
 	// questions about the program's typesystem.
@@ -59,7 +59,7 @@ type Context interface {
 type Contract interface {
 	// Enforce will be called on an instance of the Contract automatically
 	// by the runtime.
-	Enforce(ctx Context)
+	Enforce(ctx Context) error
 }
 
 //go:generate stringer -type Kind -trimprefix Kind
@@ -68,15 +68,20 @@ type Contract interface {
 // contract binding was declared.
 type Kind int
 
-// TODO(bob): Document what the user can expect to see in the various
-// Context methods.
+// The various kinds will inform the contract implementation as to
+// what values it can expect to receive from the various Context methods.
+//  | Kind             | Context.Declaration()     | Context.Objects()                 |
+//  ------------------------------------------------------------------------------------
+//  | Method           | *ssa.Function             | { Declaration() }                 |
+//  | Function         | *ssa.Function             | { Declaration() }                 |
+//  | Interface        | *ssa.Type (the interface) | []*ssa.Type (implementations)     |
+//  | InterfaceMethod  | *ssa.Type (the interface) | []*ssa.Function (implementations) |
+//  | Type             | *ssa.Type                 | { Declaration() }                 |
 const (
-	// An unset kind.
-	KindUnknown Kind = iota
 	// A method declaration like:
 	//   func (r Receiver) Foo() { ... }
 	// presents just the function.
-	KindMethod
+	KindMethod Kind = iota + 1
 	// A top-level function declaration:
 	//   func Foo () { .... }
 	// presents just the function.
