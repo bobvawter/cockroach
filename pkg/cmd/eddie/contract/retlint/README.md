@@ -1,11 +1,7 @@
-# Return Linter
+# Return Type Contract
 
 > It would be nice if only `pgerror.Error` were actually returned from
 > an API, even though the functions are declared as returning `error`.
-
-```
-Output of retlint --help goes here.
-```
 
 ## Motivation
 
@@ -21,11 +17,11 @@ actually returned from functions that declare `error` as a return type.
 Thanks to the availability of the
 [`analysis`](https://godoc.org/golang.org/x/tools/go/analysis) and
 [`ssa`](https://godoc.org/golang.org/x/tools/go/ssa) packages, it is
-relatively straightforward to build a linter which can examine the call
+relatively straightforward to build a contract which can examine the call
 graph and type flow within a package or to perform a whole-world
 analysis on a program.
 
-The input to the linter is as follows:
+The input to the contract is as follows:
 * A target interface, e.g. `error`.
 * A set of concrete types which implement the target interface,
   e.g. `pgerror.Error`.
@@ -33,7 +29,7 @@ The input to the linter is as follows:
   return the desired concrete types wherever the target interface is
   declared to be returned.
 
-The linter will then perform an inductive, heuristic analysis, starting
+The contract will then perform an inductive, heuristic analysis, starting
 from the seed functions. The goal of this analysis is to classify each
 reachable function into those that always return one of the desired
 types in place of the target interface and those that do not.  In cases
@@ -80,8 +76,3 @@ edges are `clean`.
 Functions are unnecessarily `dirty` if they:
 * Return a value from an indirect invocation.
   * `if _, err := someCallback(); err != nil { return err }`
-* Return a value from an interface invocation.
-  * `if _, err := someIntf.doSomething(); err != nil { return err }`
-  * This could be lifted in a whole-program analysis by examining
-    all `doSomething()` functions defined on declared types which
-    implement the enclosing interface.

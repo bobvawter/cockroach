@@ -17,7 +17,7 @@ package testdata
 import "errors"
 
 type Selfish interface {
-	//contract:retlint
+	//contract:RetLint
 	Self() error
 }
 
@@ -37,7 +37,7 @@ func (GoodValError) Error() string { return "Good" }
 
 type ReturnsGood interface {
 	// All known implementors of this method return a good value.
-	//contract:retlint
+	//contract:RetLint
 	error() error
 }
 
@@ -60,12 +60,12 @@ var (
 	_ ReturnsGood = ReturnsGoodImpl2{}
 )
 
-//contract:retlint
+//contract:RetLint
 func DirectBad() error {
 	return errors.New("nope")
 }
 
-//contract:retlint
+//contract:RetLint
 func DirectGood() error {
 	switch choose() {
 	case 0:
@@ -77,24 +77,24 @@ func DirectGood() error {
 	}
 }
 
-//contract:retlint
+//contract:RetLint
 func DirectTupleBad() (int, error) {
 	return 0, errors.New("nope")
 }
 
-//contract:retlint
+//contract:RetLint
 func DirectTupleBadCaller() error {
 	_, err := DirectTupleBad()
 	return err
 }
 
-//contract:retlint
+//contract:RetLint
 func DirectTupleBadChain() (int, error) {
 	x, err := DirectTupleBad()
 	return x + 1, err
 }
 
-//contract:retlint
+//contract:RetLint
 func EnsureGoodValWithCommaOk(err error) error {
 	if tested, ok := err.(GoodValError); ok {
 		return tested
@@ -102,24 +102,24 @@ func EnsureGoodValWithCommaOk(err error) error {
 	return GoodValError{}
 }
 
-//contract:retlint
+//contract:RetLint
 func ExplictReturnVarNoOp() (err error) {
 	return
 }
 
-//contract:retlint
+//contract:RetLint
 func ExplicitReturnVarBad() (err error) {
 	err = DirectBad()
 	return
 }
 
-//contract:retlint
+//contract:RetLint
 func ExplicitReturnVarGood() (err error) {
 	err = DirectGood()
 	return
 }
 
-//contract:retlint
+//contract:RetLint
 func ExplicitReturnVarPhiBad() (err error) {
 	switch choose() {
 	case 0:
@@ -130,7 +130,7 @@ func ExplicitReturnVarPhiBad() (err error) {
 	return
 }
 
-//contract:retlint
+//contract:RetLint
 func ExplicitReturnVarPhiGood() (err error) {
 	switch choose() {
 	case 0:
@@ -143,7 +143,7 @@ func ExplicitReturnVarPhiGood() (err error) {
 	return
 }
 
-//contract:retlint
+//contract:RetLint
 func EnsureGoodValWithSwitch(err error) error {
 	switch t := err.(type) {
 	case GoodValError:
@@ -155,30 +155,30 @@ func EnsureGoodValWithSwitch(err error) error {
 	}
 }
 
-//contract:retlint
+//contract:RetLint
 func MakesIndirectCall(fn func() error) error {
 	return fn()
 }
 
-//contract:retlint
+//contract:RetLint
 func MakesInterfaceCallBad(g Selfish) error {
 	return g.Self()
 }
 
-//contract:retlint
+//contract:RetLint
 func MakesInterfaceCallGood(g ReturnsGood) error {
 	return g.error()
 }
 
-//contract:retlint
+//contract:RetLint
 func NoopGood() {}
 
-//contract:retlint
+//contract:RetLint
 func NoopCallGood() {
 	NoopGood()
 }
 
-//contract:retlint
+//contract:RetLint
 func PhiBad() error {
 	var ret error
 	switch choose() {
@@ -196,7 +196,7 @@ func PhiBad() error {
 	return ret
 }
 
-//contract:retlint
+//contract:RetLint
 func PhiGood() error {
 	var ret error
 	switch choose() {
@@ -213,7 +213,7 @@ func PhiGood() error {
 }
 
 // ShortestWhyPath demonstrates that we choose the shortest "why" path.
-//contract:retlint
+//contract:RetLint
 func ShortestWhyPath() error {
 	switch choose() {
 	case 0:
@@ -225,7 +225,7 @@ func ShortestWhyPath() error {
 	}
 }
 
-//contract:retlint
+//contract:RetLint
 func ReturnNilGood() error {
 	return nil
 }
@@ -233,7 +233,7 @@ func ReturnNilGood() error {
 // Trying to run down this particular form, where we don't return the
 // value of the TypeAssert has proven to be excessively convoluted
 // to get right.
-//contract:retlint
+//contract:RetLint
 func TodoNoTypeInference(err error) error {
 	if _, ok := err.(GoodValError); ok {
 		return err
@@ -241,12 +241,12 @@ func TodoNoTypeInference(err error) error {
 	return GoodValError{}
 }
 
-//contract:retlint
+//contract:RetLint
 func UsesSelfBad() error {
 	return (&BadError{}).Self()
 }
 
-//contract:retlint
+//contract:RetLint
 func UsesSelfGood() error {
 	return (&GoodPtrError{}).Self()
 }

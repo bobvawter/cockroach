@@ -55,14 +55,6 @@ type Context interface {
 	Reportf(l Located, msg string, args ...interface{})
 }
 
-// A Contract implements some correctness-checking logic.
-type Contract interface {
-	// Enforce will be called on an instance of the Contract automatically
-	// by the runtime. Any error returned by this method will be reported
-	// against the declaration object.
-	Enforce(ctx Context) error
-}
-
 //go:generate stringer -type Kind -trimprefix Kind
 
 // The Kind of a contract is a representation of how and where the

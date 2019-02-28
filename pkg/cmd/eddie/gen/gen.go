@@ -17,6 +17,7 @@ package gen
 
 import (
 	"bytes"
+	"fmt"
 	"go/ast"
 	"go/format"
 	"go/token"
@@ -44,7 +45,7 @@ type Eddie struct {
 	Outfile  string
 	Packages []string
 
-	contracts []types.Type
+	contracts []types.Object
 	extPkg    string
 	rtPkg     string
 
@@ -100,6 +101,7 @@ func (e *Eddie) findContracts() error {
 		return err
 	}
 
+	// Look for the type assertion.
 	for _, pkg := range pkgs {
 		for _, f := range pkg.Syntax {
 			for _, d := range f.Decls {
@@ -108,14 +110,22 @@ func (e *Eddie) findContracts() error {
 						if v, ok := s.(*ast.ValueSpec); ok &&
 							len(v.Values) == 1 &&
 							v.Names[0].Name == "_" {
+							// assignmentType is the LHS type.
 							assignmentType, _ := pkg.TypesInfo.TypeOf(v.Type).(*types.Named)
 							if assignmentType == nil ||
 								assignmentType.Obj().Pkg().Path() != e.extPkg ||
 								assignmentType.Obj().Name() != "Contract" {
 								continue
 							}
+							// value:Type is the type of the RHS. It should be a named
+							// type or a pointer thereto.
 							valueType := pkg.TypesInfo.TypeOf(v.Values[0])
-							e.contracts = append(e.contracts, valueType)
+							if ptr, ok := valueType.(*types.Pointer); ok {
+								valueType = ptr.Elem()
+							}
+							if named, ok := valueType.(*types.Named); ok {
+								e.contracts = append(e.contracts, named.Obj())
+							}
 						}
 					}
 				}
@@ -143,23 +153,17 @@ func (e *Eddie) writeBinary() error {
 	}
 
 	fnMap := template.FuncMap{
-		"Contracts": func() []*types.Named {
-			ret := make([]*types.Named, len(e.contracts))
-			for idx, c := range e.contracts {
-				switch t := c.(type) {
-				case *types.Named:
-					ret[idx] = t
-				case *types.Pointer:
-					ret[idx] = t.Elem().(*types.Named)
-				default:
-					panic(errors.Errorf("unhandled type %s", reflect.TypeOf(c)))
-				}
-			}
-			return ret
+		"Contracts": func() []types.Object { return e.contracts },
+		"ExtPkg":    func() string { return e.extPkg },
+		"Help": func(obj types.Object) string {
+			// Ideally, this would emit the struct definition and
+			// additional documentation. For now, we'll create a godoc
+			// link for users to follow.
+			return fmt.Sprintf("`contract:%s\n\thttps://godoc.org/%s#%s`",
+				obj.Name(), obj.Pkg().Path(), obj.Name())
 		},
-		"ExtPkg": func() string { return e.extPkg },
-		"Name":   func() string { return e.Name },
-		"RtPkg":  func() string { return e.rtPkg },
+		"Name":  func() string { return e.Name },
+		"RtPkg": func() string { return e.rtPkg },
 	}
 
 	t, err := template.New("root").Funcs(fnMap).Parse(`
@@ -170,14 +174,17 @@ import (
 	ext "{{ ExtPkg }}"
 	rt "{{ RtPkg }}"
 	{{ range $idx, $c := Contracts -}}
-		c{{ $idx }} "{{ $c.Obj.Pkg.Path }}"
+		c{{ $idx }} "{{ $c.Pkg.Path }}"
 	{{ end }}
 )
 
 var Enforcer = rt.Enforcer{
-	Contracts: map[string]func() ext.Contract {
+	Contracts: ext.ContractProviders {
 	{{ range $idx, $c := Contracts -}}
-		"{{ $c.Obj.Name }}" : func() ext.Contract { return &c{{ $idx }}.{{ $c.Obj.Name}}{} },
+		"{{ $c.Name }}" : {
+			New: func() ext.Contract { return &c{{ $idx }}.{{ $c.Name}}{} },
+			Help: {{ Help $c }},
+		},
 	{{ end }}
 	},
 	Name: "{{ Name }}",

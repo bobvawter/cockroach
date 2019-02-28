@@ -19,7 +19,7 @@ func main() {
 
 	e := gen.Eddie{}
 	root := &cobra.Command{
-		Use:          exec,
+		Use:          exec + " [packages]",
 		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			e.Logger = log.New(cmd.OutOrStdout(), "", 0 /* no flags */)

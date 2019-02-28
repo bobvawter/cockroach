@@ -47,7 +47,7 @@ type Results map[token.Position][]string
 type Enforcer struct {
 	// Contracts contains providers for the various Contract types.
 	// This map is the primary point of code-generation.
-	Contracts map[string]func() ext.Contract
+	Contracts ext.ContractProviders
 	// Allows the working directory to be overridden.
 	Dir string
 	// The name of the generated linter.
@@ -73,6 +73,9 @@ type Enforcer struct {
 
 // Execute allows an Enforcer to be called programmatically.
 func (e *Enforcer) Execute(ctx context.Context) (Results, error) {
+	if len(e.Packages) == 0 {
+		return nil, errors.New("no packages specified")
+	}
 	// Load the source
 	cfg := &packages.Config{
 		Dir:   e.Dir,
@@ -129,9 +132,12 @@ func (e *Enforcer) Execute(ctx context.Context) (Results, error) {
 
 // Main is called by the generated main() code.
 func (e *Enforcer) Main() {
-	root := cobra.Command{
-		Use:          e.Name,
-		SilenceUsage: true,
+	verbose := false
+	enforce := &cobra.Command{
+		Use:           "enforce [packages]",
+		Short:         "Enforce contracts defined in the given packages",
+		SilenceErrors: true,
+		SilenceUsage:  true,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
@@ -149,10 +155,14 @@ func (e *Enforcer) Main() {
 				}
 			}()
 
+			e.Packages = args
+			if verbose {
+				e.Logger = log.New(os.Stdout, "" /* prefix */, 0 /* flags */)
+			}
 			results, err := e.Execute(ctx)
 			for pos, msgs := range results {
 				for _, msg := range msgs {
-					cmd.Printf("%s: %s", pos, msg)
+					cmd.Printf("%s: %s\n", pos, msg)
 				}
 			}
 			if err == nil && e.SetExitStatus {
@@ -161,17 +171,34 @@ func (e *Enforcer) Main() {
 			return err
 		},
 	}
-	root.Flags().BoolVar(&e.SetExitStatus, "set_exit_status",
+	enforce.Flags().StringVarP(&e.Dir, "dir", "d",
+		".", "override the current working directory")
+	enforce.Flags().BoolVar(&e.SetExitStatus, "set_exit_status",
 		false, "return a non-zero exit code if errors are reported")
+	enforce.Flags().BoolVarP(&e.Tests, "tests", "t",
+		false, "include test sources in the analysis")
+	enforce.Flags().BoolVarP(&verbose, "verbose", "v",
+		false, "enable additional diagnostic messages")
 
+	root := &cobra.Command{
+		Use: e.Name,
+	}
 	root.AddCommand(
+		enforce,
 		&cobra.Command{
 			Use:   "contracts",
 			Short: "Lists all defined contracts",
-			Run: func(cmd *cobra.Command, _ []string) {
-				for name := range e.Contracts {
-					cmd.Println(name)
+			RunE: func(cmd *cobra.Command, _ []string) error {
+				for name, provider := range e.Contracts {
+					if provider.Help == "" {
+						cmd.Println("contract:" + name)
+					}
+					if provider.Help != "" {
+						cmd.Println(provider.Help)
+					}
+					cmd.Println()
 				}
+				return nil
 			},
 		})
 
@@ -226,7 +253,10 @@ func (e *Enforcer) enforce(ctx context.Context, tgt *target) error {
 		panic(errors.Errorf("unimplemented: %s", tgt.kind))
 	}
 
-	return tgt.impl.Enforce(impl)
+	if err := tgt.impl.Enforce(impl); err != nil {
+		impl.Reportf(impl.declaration, "%s: %v", tgt.contract, err)
+	}
+	return nil
 }
 
 // enforceAll executes all targets.
@@ -326,7 +356,7 @@ func (e *Enforcer) expandAll(ctx context.Context) error {
 			return errors.Errorf("%s: cannot find contract named %s",
 				tgt.fset.Position(tgt.Pos()), tgt.contract)
 		}
-		tgt.impl = provider()
+		tgt.impl = provider.New()
 		if tgt.config != "" {
 			// Disallow unknown fields to help with typos.
 			d := json.NewDecoder(strings.NewReader(tgt.config))

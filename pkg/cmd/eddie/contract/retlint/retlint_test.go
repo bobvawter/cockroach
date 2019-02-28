@@ -63,8 +63,8 @@ func Test(t *testing.T) {
 	aggregator := &aggregator{fakePkgName: fakePkgName}
 
 	e := rt.Enforcer{
-		Contracts: map[string]func() ext.Contract{
-			"retlint": func() ext.Contract { return aggregator },
+		Contracts: ext.ContractProviders{
+			"RetLint": {New: func() ext.Contract { return aggregator }},
 		},
 		Dir:      fakePkgName,
 		Logger:   log.New(os.Stdout, "", 0),

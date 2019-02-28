@@ -158,10 +158,12 @@ func Test(t *testing.T) {
 		},
 	}
 
-	newRecorder := func() ext.Contract { return &recorder{t, tcs, -1} }
+	newRecorder := &ext.ContractProvider{
+		New: func() ext.Contract { return &recorder{t, tcs, -1} },
+	}
 
 	e := &Enforcer{
-		Contracts: map[string]func() ext.Contract{
+		Contracts: ext.ContractProviders{
 			"CanGoHere":     newRecorder,
 			"MustReturnInt": newRecorder,
 		},
