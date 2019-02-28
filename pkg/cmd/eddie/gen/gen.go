@@ -38,12 +38,13 @@ import (
 // Eddie generates a contract-enforcer binary.  See discussion on the
 // public API for details on the patterns that it looks for.
 type Eddie struct {
-	Dir      string
-	KeepTemp bool
-	Logger   *log.Logger
-	Name     string
-	Outfile  string
-	Packages []string
+	BuildFlags []string
+	Dir        string
+	KeepTemp   bool
+	Logger     *log.Logger
+	Name       string
+	Outfile    string
+	Packages   []string
 
 	contracts []types.Object
 	extPkg    string
@@ -93,8 +94,9 @@ func (e *Eddie) Execute() error {
 //   var _ Contract = &MyContract{}
 func (e *Eddie) findContracts() error {
 	cfg := &packages.Config{
-		Dir:  e.Dir,
-		Mode: packages.LoadAllSyntax,
+		BuildFlags: e.BuildFlags,
+		Dir:        e.Dir,
+		Mode:       packages.LoadAllSyntax,
 	}
 	pkgs, err := packages.Load(cfg, e.Packages...)
 	if err != nil {
@@ -144,7 +146,9 @@ func (e *Eddie) writeBinary() error {
 	if err != nil {
 		return err
 	}
-	if !e.KeepTemp {
+	if e.KeepTemp {
+		e.Logger.Printf("writing to temporary directory %s", tempDir)
+	} else {
 		defer func() {
 			if err := os.RemoveAll(tempDir); err != nil {
 				panic(err)
@@ -228,6 +232,7 @@ func main() {
 		args = append(args, "-buildmode=plugin")
 	}
 	args = append(args, main)
+	args = append(args, e.BuildFlags...)
 
 	build := exec.Command("go", args...)
 	build.Dir = e.Dir

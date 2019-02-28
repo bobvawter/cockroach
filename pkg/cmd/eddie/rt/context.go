@@ -17,38 +17,31 @@ package rt
 import (
 	"context"
 	"fmt"
-	"go/token"
 
 	"github.com/cockroachdb/cockroach/pkg/cmd/eddie/ext"
 	"golang.org/x/tools/go/ssa"
 )
 
-type report struct {
-	info string
-	pos  token.Pos
-}
-
 type contextImpl struct {
 	context.Context
-	contract    string
 	declaration ssa.Member
-	kind        ext.Kind
 	objects     []ssa.Member
 	oracle      *ext.TypeOracle
 	program     *ssa.Program
 	reports     chan<- report
+	target      *target
 }
 
 var _ ext.Context = &contextImpl{}
 
 // Contract implements ext.Context.
-func (c *contextImpl) Contract() string { return c.contract }
+func (c *contextImpl) Contract() string { return c.target.contract }
 
 // Declarations implements ext.Context.
 func (c *contextImpl) Declaration() ssa.Member { return c.declaration }
 
 // Kind implements ext.Context.
-func (c *contextImpl) Kind() ext.Kind { return c.kind }
+func (c *contextImpl) Kind() ext.Kind { return c.target.kind }
 
 // Objects implements ext.Context.
 func (c *contextImpl) Objects() []ssa.Member {
@@ -66,7 +59,7 @@ func (c *contextImpl) Program() *ssa.Program { return c.program }
 
 // Declarations implements ext.Context.
 func (c *contextImpl) Report(l ext.Located, msg string) {
-	c.reports <- report{msg, l.Pos()}
+	c.reports <- report{msg, l.Pos(), c.target}
 }
 
 // Reportf implements ext.Context.

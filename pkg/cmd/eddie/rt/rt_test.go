@@ -176,7 +176,7 @@ func Test(t *testing.T) {
 	res, err := e.Execute(context.Background())
 	a.NoError(err)
 	a.Len(e.aliases, 1)
-	a.Len(e.assertions, 4)
+	a.Len(e.assertions, 2)
 	a.Equal(len(e.targets), len(tcs), "target / test-case mismatch")
 
 	reports := 0

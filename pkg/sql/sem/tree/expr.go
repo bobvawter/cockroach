@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"strconv"
 
+	"github.com/cockroachdb/cockroach/pkg/cmd/eddie/ext"
 	"github.com/cockroachdb/cockroach/pkg/sql/coltypes"
 	"github.com/cockroachdb/cockroach/pkg/sql/lex"
 	"github.com/cockroachdb/cockroach/pkg/sql/pgwire/pgerror"
@@ -49,6 +50,14 @@ type Expr interface {
 	TypeCheck(ctx *SemaContext, desired types.T) (TypedExpr, error)
 }
 
+/*
+	contract:RetLint {
+		"AllowedNames": ["github.com/cockroachdb/cockroach/pkg/sql/pgwire/pgerror/Error"],
+		"TargetName": "error"
+  }
+*/
+type ReturnPgError ext.Contract
+
 // TypedExpr represents a well-typed expression.
 type TypedExpr interface {
 	Expr
@@ -62,6 +71,7 @@ type TypedExpr interface {
 	// should be replaced prior to expression evaluation by an
 	// appropriate WalkExpr. For example, Placeholder should be replace
 	// by the argument passed from the client.
+	//contract:ReturnPgError
 	Eval(*EvalContext) (Datum, error)
 	// ResolvedType provides the type of the TypedExpr, which is the type of Datum
 	// that the TypedExpr will return when evaluated.

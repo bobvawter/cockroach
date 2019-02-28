@@ -36,10 +36,11 @@ func TestCompileAndLoad(t *testing.T) {
 	}
 
 	e := Eddie{
-		Name:     "gen_test",
-		Outfile:  exe.Name(),
-		Packages: []string{"../demo"},
-		Plugin:   true,
+		BuildFlags: []string{"-tags", "demo"},
+		Name:       "gen_test",
+		Outfile:    exe.Name(),
+		Packages:   []string{"../demo"},
+		Plugin:     true,
 	}
 	a.NoError(e.Execute())
 

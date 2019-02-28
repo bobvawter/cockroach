@@ -79,11 +79,14 @@ func (o *TypeOracle) TypeImplementors(intf *types.Interface, assertedOnly bool) 
 	} else {
 		o.mu.RLock()
 		// We may insert nil slices later on, so use comma-ok.
-		ret, found := o.mu.typeImplementors[intf]
+		maybe, found := o.mu.typeImplementors[intf]
 		o.mu.RUnlock()
 
 		if !found {
 			for _, typ := range o.pgm.RuntimeTypes() {
+				if !types.Implements(typ, intf) {
+					continue
+				}
 				var lastName types.Object
 			chase:
 				for {
@@ -98,12 +101,13 @@ func (o *TypeOracle) TypeImplementors(intf *types.Interface, assertedOnly bool) 
 					}
 				}
 				if lastName != nil {
-					ret = append(ret, lastName)
+					maybe = append(maybe, lastName)
 				}
 			}
 
+			ret = maybe
 			o.mu.Lock()
-			o.mu.typeImplementors[intf] = ret
+			o.mu.typeImplementors[intf] = maybe
 			o.mu.Unlock()
 		}
 	}

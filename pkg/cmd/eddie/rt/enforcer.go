@@ -39,12 +39,20 @@ import (
 	"golang.org/x/tools/go/ssa/ssautil"
 )
 
-type Results map[token.Position][]string
+type Result struct {
+	Msg string
+}
+
+type Results map[token.Position][]*Result
 
 // Enforcer is the main entrypoint for a generated linter binary.
 // The generated code will just configure an instance of Enforcer
 // and call its Main() method.
 type Enforcer struct {
+	// If true, we will only consider types to implement an interface
+	// if there is an explicit assertion of the form:
+	//   var _ Intf = &Impl{}
+	AssertedInterfaces bool
 	// Contracts contains providers for the various Contract types.
 	// This map is the primary point of code-generation.
 	Contracts ext.ContractProviders
@@ -102,7 +110,6 @@ func (e *Enforcer) Execute(ctx context.Context) (Results, error) {
 	// Prep SSA program. We'll defer building the packages until we
 	// need to present a function to a Contract.
 	e.ssaPgm, _ = ssautil.AllPackages(pkgs, 0 /* mode */)
-	e.ssaPgm.Build()
 
 	// Look for contract declarations on the AST side before we go through
 	// the bother of converting to SSA form
@@ -117,16 +124,29 @@ func (e *Enforcer) Execute(ctx context.Context) (Results, error) {
 
 	e.reports = make(chan report)
 	ret := make(Results)
+	doneReporting := syncutil.Mutex{}
+	doneReporting.Lock()
 	go func() {
 		for r := range e.reports {
 			pos := cfg.Fset.Position(r.pos)
-			ret[pos] = append(ret[pos], r.info)
+			sb := &strings.Builder{}
+			fmt.Fprintf(sb, "violates contract %s", r.target.contract)
+			for _, chunk := range strings.Split(r.info, "\n") {
+				sb.WriteString("\n>> ")
+				sb.WriteString(chunk)
+			}
+			ret[pos] = append(ret[pos], &Result{Msg: sb.String()})
 		}
+		doneReporting.Unlock()
 	}()
+
+	// Defer building SSA nodes until we know that all configuration is good.
+	e.ssaPgm.Build()
 
 	// Now, we can run the contracts.
 	err = e.enforceAll(ctx)
 	close(e.reports)
+	doneReporting.Lock()
 	return ret, err
 }
 
@@ -149,9 +169,11 @@ func (e *Enforcer) Main() {
 
 			go func() {
 				select {
-				case <-sig:
-					e.println("Interrupted")
-					cancel()
+				case _, open := <-sig:
+					if open {
+						cmd.Println("Interrupted")
+						cancel()
+					}
 				}
 			}()
 
@@ -160,9 +182,9 @@ func (e *Enforcer) Main() {
 				e.Logger = log.New(os.Stdout, "" /* prefix */, 0 /* flags */)
 			}
 			results, err := e.Execute(ctx)
-			for pos, msgs := range results {
-				for _, msg := range msgs {
-					cmd.Printf("%s: %s\n", pos, msg)
+			for pos, slice := range results {
+				for _, result := range slice {
+					cmd.Printf("%s: %s\n\n", pos, result.Msg)
 				}
 			}
 			if err == nil && e.SetExitStatus {
@@ -171,6 +193,8 @@ func (e *Enforcer) Main() {
 			return err
 		},
 	}
+	enforce.Flags().BoolVar(&e.AssertedInterfaces, "asserted_only",
+		false, "only consider explicit type assertions")
 	enforce.Flags().StringVarP(&e.Dir, "dir", "d",
 		".", "override the current working directory")
 	enforce.Flags().BoolVar(&e.SetExitStatus, "set_exit_status",
@@ -219,26 +243,26 @@ func (e *Enforcer) enforce(ctx context.Context, tgt *target) error {
 		assertions[a.intf] = append(assertions[a.intf], a.impl)
 	}
 	impl := &contextImpl{
-		Context:  ctx,
-		contract: tgt.contract,
-		kind:     tgt.kind,
-		oracle:   ext.NewOracle(e.ssaPgm, assertions),
-		program:  e.ssaPgm,
-		reports:  e.reports,
+		Context: ctx,
+		oracle:  ext.NewOracle(e.ssaPgm, assertions),
+		program: e.ssaPgm,
+		reports: e.reports,
+		target:  tgt,
 	}
 
 	switch tgt.kind {
 	case ext.KindInterface:
 		decl := e.ssaPgm.Package(tgt.object.Pkg()).Type(tgt.object.Name())
 		impl.declaration = decl
-		for _, obj := range impl.Oracle().TypeImplementors(decl.Type().Underlying().(*types.Interface), true) {
+		intf := decl.Type().Underlying().(*types.Interface)
+		for _, obj := range impl.Oracle().TypeImplementors(intf, e.AssertedInterfaces) {
 			impl.objects = append(impl.objects, e.ssaPgm.Package(obj.Pkg()).Type(obj.Name()))
 		}
 
 	case ext.KindInterfaceMethod:
 		intf := tgt.enclosing.Type().Underlying().(*types.Interface)
 		impl.declaration = e.ssaPgm.Package(tgt.enclosing.Pkg()).Type(tgt.enclosing.Name())
-		for _, i := range impl.Oracle().MethodImplementors(intf, tgt.object.Name(), true) {
+		for _, i := range impl.Oracle().MethodImplementors(intf, tgt.object.Name(), e.AssertedInterfaces) {
 			impl.objects = append(impl.objects, i)
 		}
 
@@ -252,6 +276,9 @@ func (e *Enforcer) enforce(ctx context.Context, tgt *target) error {
 	default:
 		panic(errors.Errorf("unimplemented: %s", tgt.kind))
 	}
+
+	e.printf("enforcing %s: %s %s (%d objects)",
+		e.ssaPgm.Fset.Position(tgt.pos), impl.Kind(), impl.Declaration(), len(impl.Objects()))
 
 	if err := tgt.impl.Enforce(impl); err != nil {
 		impl.Reportf(impl.declaration, "%s: %v", tgt.contract, err)
@@ -606,6 +633,13 @@ sendLoop:
 	e.assertions = mu.assertions
 	e.targets = mu.targets
 	return nil
+}
+
+// printf will emit a diagnostic message via e.Logger, if one is configured.
+func (e *Enforcer) printf(format string, args ...interface{}) {
+	if l := e.Logger; l != nil {
+		l.Printf(format, args...)
+	}
 }
 
 // println will emit a diagnostic message via e.Logger, if one is configured.

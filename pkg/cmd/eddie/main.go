@@ -27,6 +27,8 @@ func main() {
 			return e.Execute()
 		},
 	}
+	root.Flags().StringSliceVar(&e.BuildFlags, "build_flags",
+		nil, "Additional build flags to pass to the compiler.")
 	root.Flags().StringVarP(&e.Dir, "dir", "d", ".", "The directory to operate in")
 	root.Flags().BoolVar(&e.KeepTemp, "keep_temp", false, "Keep the temporary directory")
 	root.Flags().StringVarP(&e.Name, "name", "n", "", "The name of the enforcer to generate (required)")

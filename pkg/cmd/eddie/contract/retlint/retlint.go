@@ -68,6 +68,9 @@ type RetLint struct {
 
 	// The acceptable types which implement the target interface.
 	allowed map[*types.Named]bool
+	// We can significantly declutter the output by assuming that calls
+	// to any functions that are part of the same linting pass are clean.
+	assumeClean map[*ssa.Function]bool
 	// Used by testing to verify the output.
 	reported []DirtyFunction
 	// Accumulates information during the analysis.
@@ -90,6 +93,7 @@ func (l *RetLint) Enforce(ctx ext.Context) error {
 		return errors.New("no allowed implementation names set")
 	}
 	l.allowed = make(map[*types.Named]bool)
+	l.assumeClean = make(map[*ssa.Function]bool)
 	l.stats = make(map[*ssa.Function]*funcStat)
 
 	pgm := ctx.Program()
@@ -111,12 +115,14 @@ func (l *RetLint) Enforce(ctx ext.Context) error {
 		switch t := m.(type) {
 		case *ssa.Function:
 			// Top-level function declarations.
+			l.assumeClean[t] = true
 			l.stat(t)
 		case *ssa.Type:
 			// Methods defined with value receivers.
 			methods := pgm.MethodSets.MethodSet(t.Type())
 			for i := 0; i < methods.Len(); i++ {
 				if fn := pgm.MethodValue(methods.At(i)); fn != nil {
+					l.assumeClean[fn] = true
 					l.stat(fn)
 				}
 			}
@@ -124,6 +130,7 @@ func (l *RetLint) Enforce(ctx ext.Context) error {
 			methods = pgm.MethodSets.MethodSet(types.NewPointer(t.Type()))
 			for i := 0; i < methods.Len(); i++ {
 				if fn := pgm.MethodValue(methods.At(i)); fn != nil {
+					l.assumeClean[fn] = true
 					l.stat(fn)
 				}
 			}
@@ -226,6 +233,11 @@ func (l *RetLint) decide(ctx ext.Context, stat *funcStat, val ssa.Value, seen ma
 			for _, callee := range callees {
 				next := l.stat(callee)
 				l.analyze(ctx, next)
+				// Declutter the output by allowing certain calls to be
+				// assumed clean.
+				if l.assumeClean[callee] {
+					continue
+				}
 				switch next.state {
 				case stateClean:
 				// Already proven to be clean, ignore.
@@ -415,11 +427,13 @@ func (l *RetLint) report(ctx ext.Context) {
 		}
 		reported[fn] = true
 
-		sb := &strings.Builder{}
 		fset := fn.Prog.Fset
-		_, _ = fmt.Fprintf(sb, "%s: func %s",
-			fset.Position(fn.Pos()), fn.RelString(fn.Pkg.Pkg))
+		sb := &strings.Builder{}
+		sb.WriteString("invalid return type detected from ")
+		sb.WriteString(fn.RelString(fn.Pkg.Pkg))
 
+		// Skip the first entry, since that's the object on which these
+		// errors will surface on
 		for _, reason := range stat.Why() {
 			_, _ = fmt.Fprintf(sb, "\n  %s: %s: %s",
 				fset.Position(reason.Value.Pos()),
