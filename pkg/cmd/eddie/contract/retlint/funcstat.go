@@ -42,12 +42,12 @@ type funcStat struct {
 	state         state
 	targetIndexes []int
 	// why contains the shortest-dirty-path
-	why []DirtyReason
+	why []dirtyReason
 }
 
-var _ DirtyFunction = &funcStat{}
+var _ dirtyFunction = &funcStat{}
 
-// Fn implements DirtyFunction
+// Fn implements dirtyFunction
 func (s *funcStat) Fn() *ssa.Function {
 	return s.fn
 }
@@ -72,7 +72,7 @@ func (s *funcStat) String() string {
 	return sb.String()
 }
 
-// Why implements DirtyFunction.
-func (s *funcStat) Why() []DirtyReason {
+// Why implements dirtyFunction.
+func (s *funcStat) Why() []dirtyReason {
 	return s.why
 }

@@ -32,7 +32,7 @@ type aggregator struct {
 	fakePkgName string
 	mu          struct {
 		syncutil.Mutex
-		dirty []DirtyFunction
+		dirty []dirtyFunction
 	}
 }
 

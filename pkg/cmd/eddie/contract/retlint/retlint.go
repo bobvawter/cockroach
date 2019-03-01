@@ -25,9 +25,9 @@ import (
 	"golang.org/x/tools/go/ssa"
 )
 
-// DirtyFunction contains a function which did not pass the required
+// dirtyFunction contains a function which did not pass the required
 // check and the reasons why.
-type DirtyFunction interface {
+type dirtyFunction interface {
 	// Fn returns the dirty function.
 	Fn() *ssa.Function
 	// String returns a user-consumable representation of why the function
@@ -35,19 +35,19 @@ type DirtyFunction interface {
 	String() string
 	// Why returns a value-chain that describes why the function is
 	// marked as dirty.
-	Why() []DirtyReason
+	Why() []dirtyReason
 }
 
-// DirtyReason describes why a particular value does not pass the
+// dirtyReason describes why a particular value does not pass the
 // required check.
-type DirtyReason struct {
+type dirtyReason struct {
 	Reason string
 	Value  ssa.Value
 }
 
-// because constructs a new DirtyReason in a printf style.
-func because(value ssa.Value, reason string, args ...interface{}) []DirtyReason {
-	return []DirtyReason{{fmt.Sprintf(reason, args...), value}}
+// because constructs a new dirtyReason in a printf style.
+func because(value ssa.Value, reason string, args ...interface{}) []dirtyReason {
+	return []dirtyReason{{fmt.Sprintf(reason, args...), value}}
 }
 
 // RetLint analyzes functions which return an interface type. It will
@@ -70,7 +70,7 @@ type RetLint struct {
 	// to any functions that are part of the same linting pass are clean.
 	assumeClean map[*ssa.Function]bool
 	// Used by testing to verify the output.
-	reported []DirtyFunction
+	reported []dirtyFunction
 	// Accumulates information during the analysis.
 	stats map[*ssa.Function]*funcStat
 	// The interfaces that we trigger the behavior on.
@@ -237,8 +237,8 @@ func (l *RetLint) decide(ctx ext.Context, stat *funcStat, val ssa.Value, seen ma
 				// Already proven to be clean, ignore.
 				case stateDirty:
 					// Already proven to be dirty, propagate reason.
-					why := make([]DirtyReason, len(next.why)+1)
-					why[0] = DirtyReason{"calls", t}
+					why := make([]dirtyReason, len(next.why)+1)
+					why[0] = dirtyReason{"calls", t}
 					copy(why[1:], next.why)
 					l.markDirty(stat, why)
 				default:
@@ -359,7 +359,7 @@ func (l *RetLint) isAllowed(lookAt types.Type) bool {
 
 // markDirty will mark the given function as dirty and propagate
 // the reason to nodes which depend on this function.
-func (l *RetLint) markDirty(stat *funcStat, why []DirtyReason) {
+func (l *RetLint) markDirty(stat *funcStat, why []dirtyReason) {
 	var changed bool
 	// Try to choose a shorter explanation, if we can.
 	if stat.why == nil || len(why) < len(stat.why) {
@@ -372,8 +372,8 @@ func (l *RetLint) markDirty(stat *funcStat, why []DirtyReason) {
 	stat.state = stateDirty
 
 	for chained, call := range stat.dirties {
-		nextWhy := make([]DirtyReason, len(why)+1)
-		nextWhy[0] = DirtyReason{"calls", call}
+		nextWhy := make([]dirtyReason, len(why)+1)
+		nextWhy[0] = dirtyReason{"calls", call}
 		copy(nextWhy[1:], why)
 		l.markDirty(chained, nextWhy)
 	}
