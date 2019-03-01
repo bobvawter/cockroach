@@ -17,6 +17,7 @@ package ext
 import (
 	"context"
 	"go/token"
+	"io"
 
 	"golang.org/x/tools/go/ssa"
 )
@@ -48,11 +49,9 @@ type Context interface {
 	// Program returns the SSA Program object which is driving the
 	// analysis.
 	Program() *ssa.Program
-	// Report adds an error message to the output that is associated
-	// with the given object.
-	Report(l Located, msg string)
-	// Reportf is a printf-style variant of Report.
-	Reportf(l Located, msg string, args ...interface{})
+	// By default, the Context will associate any messages with the
+	// Declaration's position.
+	Reporter() Reporter
 }
 
 //go:generate stringer -type Kind -trimprefix Kind
@@ -94,3 +93,15 @@ const (
 	// presents the type declaration.
 	KindType
 )
+
+// A Reporter allows a contract to produce output messages that are
+// associated with one or more source locations.
+type Reporter interface {
+	io.Writer
+	// Detail creates a nested report to associate output with another
+	// source location. It is valid to create a tree of reports.
+	Detail(l Located) Reporter
+	Print(args ...interface{})
+	Printf(format string, args ...interface{})
+	Println(args ...interface{})
+}

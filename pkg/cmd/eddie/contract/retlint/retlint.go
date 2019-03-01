@@ -16,11 +16,9 @@ package retlint
 
 import (
 	"fmt"
-	"go/ast"
 	"go/token"
 	"go/types"
 	"path"
-	"strings"
 
 	"github.com/cockroachdb/cockroach/pkg/cmd/eddie/ext"
 	"github.com/pkg/errors"
@@ -136,10 +134,6 @@ func (l *RetLint) Enforce(ctx ext.Context) error {
 			}
 		}
 	}
-	reportFilter := make(map[*ssa.Function]bool)
-	for _, initial := range l.work {
-		reportFilter[initial.fn] = true
-	}
 
 	// Loop until we haven't added any new functions.
 	for l.work != nil {
@@ -159,12 +153,12 @@ func (l *RetLint) Enforce(ctx ext.Context) error {
 
 	// Only report dirty information for the input object(s).
 	for _, s := range l.stats {
-		if s.state == stateDirty && ast.IsExported(s.fn.Name()) && reportFilter[s.fn] {
+		if s.state == stateDirty && l.assumeClean[s.fn] {
 			l.reported = append(l.reported, s)
 		}
 	}
 
-	l.report(ctx)
+	l.report(ctx.Reporter())
 
 	return nil
 }
@@ -417,7 +411,7 @@ func resolve(pgm *ssa.Program, typeName string) (*types.Named, error) {
 
 // report produces a human-readable description of why the various
 // functions are dirty.
-func (l *RetLint) report(ctx ext.Context) {
+func (l *RetLint) report(reporter ext.Reporter) {
 	reported := make(map[*ssa.Function]bool)
 
 	for _, stat := range l.reported {
@@ -427,25 +421,19 @@ func (l *RetLint) report(ctx ext.Context) {
 		}
 		reported[fn] = true
 
-		fset := fn.Prog.Fset
-		sb := &strings.Builder{}
-		sb.WriteString("invalid return type detected from ")
-		sb.WriteString(fn.RelString(fn.Pkg.Pkg))
+		fnReporter := reporter.Detail(fn)
+		fnReporter.Printf("invalid return type from %s", fn.RelString(fn.Pkg.Pkg))
 
-		// Skip the first entry, since that's the object on which these
-		// errors will surface on
 		for _, reason := range stat.Why() {
-			_, _ = fmt.Fprintf(sb, "\n  %s: %s: %s",
-				fset.Position(reason.Value.Pos()),
-				reason.Reason,
-				reason.Value)
+			next := fnReporter.Detail(reason.Value)
+			next.Printf("%s: %s", reason.Reason, reason.Value)
 
 			if call, ok := reason.Value.(*ssa.Call); ok {
 				if callee := call.Common().StaticCallee(); callee != nil {
 					// Short-circuit the report if we're calling a function
 					// which has already been reported.
 					if reported[callee] {
-						sb.WriteString(" (already reported)")
+						next.Print(" (already reported)")
 						break
 					}
 					// Mark any reported-upon callee as already seen.
@@ -453,7 +441,6 @@ func (l *RetLint) report(ctx ext.Context) {
 				}
 			}
 		}
-		ctx.Report(fn, sb.String())
 	}
 }
 

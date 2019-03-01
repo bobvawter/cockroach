@@ -147,9 +147,3 @@ func flattenImports(pkgs []*packages.Package) map[string]*packages.Package {
 	}
 	return seen
 }
-
-type report struct {
-	info   string
-	pos    token.Pos
-	target *target
-}

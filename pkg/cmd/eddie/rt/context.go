@@ -16,20 +16,26 @@ package rt
 
 import (
 	"context"
-	"fmt"
 
 	"github.com/cockroachdb/cockroach/pkg/cmd/eddie/ext"
+	"github.com/cockroachdb/cockroach/pkg/util/syncutil"
 	"golang.org/x/tools/go/ssa"
 )
 
 type contextImpl struct {
 	context.Context
+
 	declaration ssa.Member
 	objects     []ssa.Member
 	oracle      *ext.TypeOracle
 	program     *ssa.Program
-	reports     chan<- report
+	reporter    func(*Result)
 	target      *target
+
+	mu struct {
+		syncutil.Mutex
+		dirty ext.Reporter
+	}
 }
 
 var _ ext.Context = &contextImpl{}
@@ -57,12 +63,17 @@ func (c *contextImpl) Oracle() *ext.TypeOracle { return c.oracle }
 // Program implements ext.Context.
 func (c *contextImpl) Program() *ssa.Program { return c.program }
 
-// Declarations implements ext.Context.
-func (c *contextImpl) Report(l ext.Located, msg string) {
-	c.reports <- report{msg, l.Pos(), c.target}
-}
-
-// Reportf implements ext.Context.
-func (c *contextImpl) Reportf(l ext.Located, msg string, args ...interface{}) {
-	c.Report(l, fmt.Sprintf(msg, args...))
+// Reporter implements ext.Context.
+func (c *contextImpl) Reporter() ext.Reporter {
+	var ret ext.Reporter
+	c.mu.Lock()
+	if ret = c.mu.dirty; ret == nil {
+		var result *Result
+		result, ret = newResultReporter(c.target.fset, c.target.pos,
+			c.target.contract, c.declaration.Pos())
+		c.mu.dirty = ret
+		c.reporter(result)
+	}
+	c.mu.Unlock()
+	return ret
 }

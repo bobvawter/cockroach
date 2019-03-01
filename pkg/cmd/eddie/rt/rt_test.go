@@ -48,7 +48,7 @@ func (r *recorder) Enforce(ctx ext.Context) error {
 	r.t.Run(fmt.Sprint(key), func(t *testing.T) {
 		a := assert.New(t)
 		fn := r.cases[key]
-		ctx.Report(ctx.Declaration(), "here")
+		ctx.Reporter().Println("here")
 		if a.NotNilf(fn, "missing check %#v", key) {
 			fn(a, ctx, r)
 		}
@@ -163,6 +163,7 @@ func Test(t *testing.T) {
 	}
 
 	e := &Enforcer{
+		AssertedInterfaces: true,
 		Contracts: ext.ContractProviders{
 			"CanGoHere":     newRecorder,
 			"MustReturnInt": newRecorder,
@@ -179,9 +180,5 @@ func Test(t *testing.T) {
 	a.Len(e.assertions, 2)
 	a.Equal(len(e.targets), len(tcs), "target / test-case mismatch")
 
-	reports := 0
-	for _, msgs := range res {
-		reports += len(msgs)
-	}
-	a.Equal(len(tcs), reports)
+	a.Len(res, len(tcs))
 }

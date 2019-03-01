@@ -231,8 +231,8 @@ func main() {
 	if e.Plugin {
 		args = append(args, "-buildmode=plugin")
 	}
-	args = append(args, main)
 	args = append(args, e.BuildFlags...)
+	args = append(args, main)
 
 	build := exec.Command("go", args...)
 	build.Dir = e.Dir

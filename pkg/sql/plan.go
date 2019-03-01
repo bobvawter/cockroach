@@ -119,6 +119,7 @@ func (r *runParams) ExecCfg() *ExecutorConfig {
 // - autoCommitNode
 //
 type planNode interface {
+	//contract:ReturnPgError
 	startExec(params runParams) error
 
 	// Next performs one unit of work, returning false if an error is

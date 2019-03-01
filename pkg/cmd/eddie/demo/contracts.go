@@ -39,7 +39,7 @@ func (m MustReturnInt) Enforce(ctx ext.Context) error {
 	for _, obj := range ctx.Objects() {
 		fn, ok := obj.(*ssa.Function)
 		if !ok {
-			ctx.Report(obj, "is not a function")
+			ctx.Reporter().Println("is not a function")
 			return nil
 		}
 
@@ -49,15 +49,15 @@ func (m MustReturnInt) Enforce(ctx ext.Context) error {
 				case *ssa.Return:
 					res := t.Results
 					if len(res) != 1 {
-						ctx.Report(t, "exactly one return value is required")
+						ctx.Reporter().Detail(t).Println("exactly one return value is required")
 						return nil
 					}
 					if c, ok := res[0].(*ssa.Const); ok {
 						if constant.MakeInt64(m.Expected) != c.Value {
-							ctx.Reportf(c, "expecting %d, got %s", m.Expected, c.Value)
+							ctx.Reporter().Detail(c).Printf("expecting %d, got %s", m.Expected, c.Value)
 						}
 					} else {
-						ctx.Report(res[0], "not a constant value")
+						ctx.Reporter().Detail(res[0]).Print("not a constant value")
 					}
 				}
 			}

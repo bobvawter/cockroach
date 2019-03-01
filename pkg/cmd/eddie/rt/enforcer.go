@@ -24,6 +24,7 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"runtime"
 	"sort"
 	"strings"
@@ -38,12 +39,6 @@ import (
 	"golang.org/x/tools/go/ssa"
 	"golang.org/x/tools/go/ssa/ssautil"
 )
-
-type Result struct {
-	Msg string
-}
-
-type Results map[token.Position][]*Result
 
 // Enforcer is the main entrypoint for a generated linter binary.
 // The generated code will just configure an instance of Enforcer
@@ -74,13 +69,22 @@ type Enforcer struct {
 	assertions   []*assertion
 	contractType *types.Interface
 	pkgs         []*packages.Package
-	reports      chan report
 	ssaPgm       *ssa.Program
 	targets      []*target
+
+	mu struct {
+		syncutil.Mutex
+		results Results
+	}
 }
 
 // Execute allows an Enforcer to be called programmatically.
 func (e *Enforcer) Execute(ctx context.Context) (Results, error) {
+	absDir, err := filepath.Abs(e.Dir)
+	if err != nil {
+		return nil, err
+	}
+	e.Dir = absDir
 	if len(e.Packages) == 0 {
 		return nil, errors.New("no packages specified")
 	}
@@ -122,32 +126,15 @@ func (e *Enforcer) Execute(ctx context.Context) (Results, error) {
 		return nil, err
 	}
 
-	e.reports = make(chan report)
-	ret := make(Results)
-	doneReporting := syncutil.Mutex{}
-	doneReporting.Lock()
-	go func() {
-		for r := range e.reports {
-			pos := cfg.Fset.Position(r.pos)
-			sb := &strings.Builder{}
-			fmt.Fprintf(sb, "violates contract %s", r.target.contract)
-			for _, chunk := range strings.Split(r.info, "\n") {
-				sb.WriteString("\n>> ")
-				sb.WriteString(chunk)
-			}
-			ret[pos] = append(ret[pos], &Result{Msg: sb.String()})
-		}
-		doneReporting.Unlock()
-	}()
-
 	// Defer building SSA nodes until we know that all configuration is good.
 	e.ssaPgm.Build()
 
 	// Now, we can run the contracts.
 	err = e.enforceAll(ctx)
-	close(e.reports)
-	doneReporting.Lock()
-	return ret, err
+
+	e.mu.Lock()
+
+	return e.mu.results, err
 }
 
 // Main is called by the generated main() code.
@@ -182,10 +169,14 @@ func (e *Enforcer) Main() {
 				e.Logger = log.New(os.Stdout, "" /* prefix */, 0 /* flags */)
 			}
 			results, err := e.Execute(ctx)
-			for pos, slice := range results {
-				for _, result := range slice {
-					cmd.Printf("%s: %s\n\n", pos, result.Msg)
-				}
+
+			// We can sort the top-level and second-level results to create
+			// more stable output, but we don't want to sort the remainder
+			// of the levels, since we don't know what the Contracts intended.
+			sort.Sort(results)
+			for _, result := range results {
+				sort.Sort(result.Children)
+				cmd.Printf("%s\n\n", result.StringRelative(e.Dir))
 			}
 			if err == nil && e.SetExitStatus {
 				err = errors.New("reports generated")
@@ -246,8 +237,12 @@ func (e *Enforcer) enforce(ctx context.Context, tgt *target) error {
 		Context: ctx,
 		oracle:  ext.NewOracle(e.ssaPgm, assertions),
 		program: e.ssaPgm,
-		reports: e.reports,
-		target:  tgt,
+		reporter: func(r *Result) {
+			e.mu.Lock()
+			e.mu.results = append(e.mu.results, r)
+			e.mu.Unlock()
+		},
+		target: tgt,
 	}
 
 	switch tgt.kind {
@@ -281,7 +276,7 @@ func (e *Enforcer) enforce(ctx context.Context, tgt *target) error {
 		e.ssaPgm.Fset.Position(tgt.pos), impl.Kind(), impl.Declaration(), len(impl.Objects()))
 
 	if err := tgt.impl.Enforce(impl); err != nil {
-		impl.Reportf(impl.declaration, "%s: %v", tgt.contract, err)
+		impl.Reporter().Printf("%s: %v", tgt.contract, err)
 	}
 	return nil
 }
