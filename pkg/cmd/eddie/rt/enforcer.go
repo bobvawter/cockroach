@@ -578,11 +578,11 @@ func (e *Enforcer) findContracts(ctx context.Context) error {
 		g.Go(func() error {
 			for {
 				select {
-				case work, open := <-workCh:
+				case next, open := <-workCh:
 					if !open {
 						return nil
 					}
-					if err := process(ctx, work.pkg, work.file); err != nil {
+					if err := process(ctx, next.pkg, next.file); err != nil {
 						return err
 					}
 				case <-ctx.Done():

@@ -21,6 +21,9 @@ import (
 	"golang.org/x/tools/go/ssa"
 )
 
+// Assertions define type relationships that have been explicitly
+// asserted in source.  Generally, these are declarations of the form
+//   var _ A = B{}
 type Assertions map[types.Object][]types.Object
 
 // A TypeOracle answers questions about a program's typesystem.

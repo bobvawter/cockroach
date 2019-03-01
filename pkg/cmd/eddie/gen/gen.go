@@ -55,6 +55,7 @@ type Eddie struct {
 	Plugin bool
 }
 
+// Execute allows the generator to be invoked programmatically.
 func (e *Eddie) Execute() error {
 	if e.Logger == nil {
 		e.Logger = log.New(os.Stdout, "", 0 /* no flags */)
@@ -78,10 +79,7 @@ func (e *Eddie) Execute() error {
 	if err := e.findContracts(); err != nil {
 		return err
 	}
-	if err := e.writeBinary(); err != nil {
-		return err
-	}
-	return nil
+	return e.writeBinary()
 }
 
 // findContracts looks for some very specific patterns in the original
@@ -209,13 +207,13 @@ func main() {
 
 	// Formatting this code isn't strictly necessary, but it does
 	// make it easier to inspect.
-	if formatted, err := format.Source(src.Bytes()); err != nil {
+	var formatted []byte
+	if formatted, err = format.Source(src.Bytes()); err != nil {
 		e.Logger.Print(src.String())
 		return err
-	} else {
-		src.Reset()
-		src.Write(formatted)
 	}
+	src.Reset()
+	src.Write(formatted)
 
 	main := filepath.Join(tempDir, "main.go")
 	if err := ioutil.WriteFile(main, src.Bytes(), 0644); err != nil {
