@@ -24,7 +24,6 @@ apt-key adv --keyserver hkp://keyserver.ubuntu.com:80 --recv-keys 0EBFCD88
 cat > /etc/apt/sources.list.d/docker.list <<EOF
 deb https://download.docker.com/linux/ubuntu xenial stable
 EOF
-apt-add-repository ppa:webupd8team/java
 add-apt-repository ppa:gophers/archive
 # Git 2.7, which ships with Xenial, has a bug where submodule metadata sometimes
 # uses absolute paths instead of relative paths, which means the affected
@@ -33,9 +32,6 @@ add-apt-repository ppa:gophers/archive
 add-apt-repository ppa:git-core/ppa
 apt-get update --yes
 
-# Auto-accept the Oracle Java license agreement.
-debconf-set-selections <<< "oracle-java8-installer shared/accepted-oracle-license-v1-1 select true"
-
 # Install the necessary dependencies. Keep this list small!
 apt-get install --yes \
   docker-ce \
@@ -43,7 +39,7 @@ apt-get install --yes \
   gnome-keyring \
   git \
   golang-${GOVERS} \
-  oracle-java8-installer \
+  default-jdk \
   unzip
 # Installing gnome-keyring prevents the error described in
 # https://github.com/moby/moby/issues/34048
@@ -90,7 +86,7 @@ git submodule update --init --recursive
 for branch in $(git branch --all --list --sort=-committerdate 'origin/release-*' | head -n1) master
 do
   git checkout "$branch"
-  COCKROACH_BUILDER_CCACHE=1 build/builder.sh make test testrace TESTS=-
+  COCKROACH_BUILDER_CCACHE=1 build/builder.sh make test testrace NCPUS=4
   # TODO(benesch): store the acceptanceversion somewhere more accessible.
   docker pull $(git grep cockroachdb/acceptance -- '*.go' | sed -E 's/.*"([^"]*).*"/\1/') || true
 done
