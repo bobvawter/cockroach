@@ -1,5 +1,7 @@
 # Contributing to Cockroach
 
+TEST CLA
+
 - [Prerequisites](#prerequisites)
 - [Getting and Building](#getting-and-building)
 - [Style Guide](#style-guide)
